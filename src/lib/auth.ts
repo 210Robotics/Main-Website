@@ -17,6 +17,19 @@ async function findOrCreateMember(userId: string) {
   const email = user?.primaryEmailAddress?.emailAddress?.toLowerCase();
   if (!user || !email) return null;
   if (user.externalAccounts.length && !user.passwordEnabled) throw new Error("Social sign-in is not available. Use email and password.");
+  const [emailMatch] = await getDb()
+    .select()
+    .from(members)
+    .where(eq(members.email, email))
+    .limit(1);
+  if (emailMatch) {
+    const [relinked] = await getDb()
+      .update(members)
+      .set({ clerkUserId: user.id, updatedAt: new Date() })
+      .where(eq(members.id, emailMatch.id))
+      .returning();
+    return relinked;
+  }
   const isOwner = email === (process.env.INITIAL_SUPER_ADMIN_EMAIL || "admin@210robotics.com").toLowerCase();
   const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || email.split("@")[0];
   const [created] = await getDb().insert(members).values({ clerkUserId: user.id, email, displayName, photoUrl: user.imageUrl || null, status: isOwner ? "ACTIVE" : "PENDING", accessRole: isOwner ? "SUPER_ADMIN" : "MEMBER", organizationRole: isOwner ? "President" : "Member", isPublic: isOwner }).onConflictDoNothing().returning();

@@ -17,16 +17,33 @@ export async function POST(request: NextRequest) {
       const email = primary.email_address.toLowerCase();
       const isOwner = email === (process.env.INITIAL_SUPER_ADMIN_EMAIL || "admin@210robotics.com").toLowerCase();
       const displayName = [data.first_name, data.last_name].filter(Boolean).join(" ") || email.split("@")[0];
-      await getDb().insert(members).values({
-        clerkUserId: data.id,
-        email,
-        displayName,
-        photoUrl: data.image_url || null,
-        status: isOwner ? "ACTIVE" : "PENDING",
-        accessRole: isOwner ? "SUPER_ADMIN" : "MEMBER",
-        organizationRole: isOwner ? "President" : "Member",
-        isPublic: isOwner,
-      }).onConflictDoUpdate({ target: members.clerkUserId, set: { email, displayName, photoUrl: data.image_url || null, updatedAt: new Date() } });
+      const [emailMatch] = await getDb()
+        .select({ id: members.id })
+        .from(members)
+        .where(eq(members.email, email))
+        .limit(1);
+      if (emailMatch) {
+        await getDb()
+          .update(members)
+          .set({
+            clerkUserId: data.id,
+            displayName,
+            photoUrl: data.image_url || null,
+            updatedAt: new Date(),
+          })
+          .where(eq(members.id, emailMatch.id));
+      } else {
+        await getDb().insert(members).values({
+          clerkUserId: data.id,
+          email,
+          displayName,
+          photoUrl: data.image_url || null,
+          status: isOwner ? "ACTIVE" : "PENDING",
+          accessRole: isOwner ? "SUPER_ADMIN" : "MEMBER",
+          organizationRole: isOwner ? "President" : "Member",
+          isPublic: isOwner,
+        }).onConflictDoUpdate({ target: members.clerkUserId, set: { email, displayName, photoUrl: data.image_url || null, updatedAt: new Date() } });
+      }
     }
     if (event.type === "user.deleted" && event.data.id) {
       await getDb().update(members).set({ status: "SUSPENDED", isPublic: false, updatedAt: new Date() }).where(eq(members.clerkUserId, event.data.id));
