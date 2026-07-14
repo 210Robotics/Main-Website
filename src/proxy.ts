@@ -4,7 +4,14 @@ import { NextResponse } from "next/server";
 const isProtected = createRouteMatcher(["/portal(.*)", "/admin(.*)"]);
 
 const protectedProxy = clerkMiddleware(async (auth, request) => {
-  if (isProtected(request)) await auth.protect();
+  if (isProtected(request)) {
+    const session = await auth();
+    if (!session.userId) {
+      const signIn = new URL("/sign-in", request.url);
+      signIn.searchParams.set("redirect_url", request.url);
+      return NextResponse.redirect(signIn);
+    }
+  }
 });
 
 const passthrough = () => NextResponse.next();
