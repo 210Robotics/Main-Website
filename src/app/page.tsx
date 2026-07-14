@@ -59,15 +59,28 @@ export default async function Home() {
               </Link>
             </div>
           </div>
-          <div className="home-logo-panel" aria-label="210 Robotics">
+          <div className="hero-logo-stage" aria-label="210 Robotics program system">
+            <div className="hero-logo-glow" />
+            <div className="hero-logo-orbit" />
+            <div className="hero-logo-scan" />
             <Image
-              src="/icon.png"
+              src="/media/brand/210-banner.png"
               alt="210 Robotics logo"
               fill
               sizes="(max-width:1024px) 80vw, 42vw"
-              className="object-contain"
+              className="hero-logo-mark object-contain"
               priority
             />
+            <Link href="/programs/vex-u" className="hero-legend hero-legend-vex">
+              <span>01</span><strong>VEX U</strong><small>COMPETE</small>
+            </Link>
+            <Link href="/programs/sidc" className="hero-legend hero-legend-sidc">
+              <span>02</span><strong>SIDC</strong><small>INNOVATE</small>
+            </Link>
+            <Link href="/projects/roborowdy" className="hero-legend hero-legend-rowdy">
+              <span>03</span><strong>ROBOROWDY</strong><small>AUTOMATE</small>
+            </Link>
+            <p className="hero-logo-label">THREE PROGRAMS // ONE MISSION</p>
           </div>
         </div>
         <div className="absolute bottom-0 right-0 hidden border-l border-t border-[#333] bg-black/70 backdrop-blur md:grid md:grid-cols-3">

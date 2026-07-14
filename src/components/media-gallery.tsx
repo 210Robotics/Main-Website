@@ -17,22 +17,36 @@ export function MediaGallery({
   return (
     <>
       <div className="media-grid">
-        {visible.map((item, index) => (
-          <button
-            aria-label={`Open ${item.alt}`}
-            className={`group media-tile media-tile-${index % 6}`}
-            key={item.id}
-            onClick={() => setActive(item)}
-          >
-            <Image
-              src={item.url}
-              alt={item.alt}
-              fill
-              sizes="(max-width: 700px) 100vw, 40vw"
-              className="object-cover transition duration-700 group-hover:scale-110"
-            />
-          </button>
-        ))}
+        {visible.map((item, index) =>
+          item.mediaType === "video" ? (
+            <div className={`media-tile media-tile-${index % 6}`} key={item.id}>
+              <video
+                className="h-full w-full object-cover"
+                controls
+                playsInline
+                preload="metadata"
+                aria-label={item.alt}
+              >
+                <source src={item.url} type="video/mp4" />
+              </video>
+            </div>
+          ) : (
+            <button
+              aria-label={`Open ${item.alt}`}
+              className={`group media-tile media-tile-${index % 6}`}
+              key={item.id}
+              onClick={() => setActive(item)}
+            >
+              <Image
+                src={item.url}
+                alt={item.alt}
+                fill
+                sizes="(max-width: 700px) 100vw, 40vw"
+                className="object-cover transition duration-700 group-hover:scale-110"
+              />
+            </button>
+          ),
+        )}
       </div>
       <p className="mt-4 text-right text-[.68rem] text-[#666]">
         <a
@@ -41,7 +55,7 @@ export function MediaGallery({
           target="_blank"
           rel="noreferrer"
         >
-          View the shared photo folder in Google Drive ↗
+          View the shared media folder in Google Drive ↗
         </a>
       </p>
       {active && (
@@ -63,13 +77,19 @@ export function MediaGallery({
             className="relative h-[82vh] w-[94vw] max-w-7xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <Image
-              src={active.url}
-              alt={active.alt}
-              fill
-              sizes="94vw"
-              className="object-contain"
-            />
+            {active.mediaType === "video" ? (
+              <video className="h-full w-full object-contain" controls autoPlay playsInline>
+                <source src={active.url} type="video/mp4" />
+              </video>
+            ) : (
+              <Image
+                src={active.url}
+                alt={active.alt}
+                fill
+                sizes="94vw"
+                className="object-contain"
+              />
+            )}
           </div>
         </div>
       )}

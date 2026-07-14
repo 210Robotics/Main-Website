@@ -12,6 +12,7 @@ const links = [
   { href: "/about", label: "About" },
   { href: "/programs/vex-u", label: "VEX U" },
   { href: "/programs/sidc", label: "SIDC" },
+  { href: "/projects/roborowdy", label: "RoboRowdy" },
   { href: "/team", label: "Team" },
   { href: "/news", label: "News" },
   { href: "/events", label: "Events" },
@@ -37,14 +38,14 @@ export function SiteHeader() {
         </Link>
         <nav
           aria-label="Primary navigation"
-          className="hidden items-center gap-5 xl:flex"
+          className="hidden items-center gap-4 xl:flex"
         >
           {links.map((link) => (
             <Link
               key={link.href}
               href={link.href}
               className={cn(
-                "text-[.7rem] font-bold uppercase tracking-[.09em] text-[#bbb] transition hover:text-white",
+                "text-[.67rem] font-bold uppercase tracking-[.075em] text-[#bbb] transition hover:text-white",
                 pathname === link.href && "text-[#fd7803]",
               )}
             >

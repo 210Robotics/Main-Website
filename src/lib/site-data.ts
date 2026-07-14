@@ -8,7 +8,7 @@ export type Member = {
   role: string;
   sidcRole?: string;
   projects: ProjectName[];
-  image: string;
+  image?: string;
   bio: string;
   accessRole: AccessRole;
   featured?: boolean;
@@ -107,16 +107,6 @@ export const members: Member[] = [
     accessRole: "MEMBER",
   },
   {
-    id: "jiseo-chon",
-    name: "Jiseo Chon",
-    role: "Member",
-    sidcRole: "Mechanical Engineering",
-    projects: ["SIDC", "RoboRowdy"],
-    image: "/media/brand/siemens-team.png",
-    bio: "Contributed mechanical engineering, prototyping, and physical-system development.",
-    accessRole: "MEMBER",
-  },
-  {
     id: "vian-chen",
     name: "Vian Chen",
     role: "Member",
@@ -134,6 +124,15 @@ export const members: Member[] = [
     projects: ["SIDC", "RoboRowdy"],
     image: "/media/team/roman-benavides.jpg",
     bio: "Connected mechanical, human, and production needs through prototyping and integration.",
+    accessRole: "MEMBER",
+  },
+  {
+    id: "jiseo-chon",
+    name: "Jiseo Chon",
+    role: "Member",
+    sidcRole: "Mechanical Engineering",
+    projects: ["SIDC", "RoboRowdy"],
+    bio: "Contributed mechanical engineering, prototyping, and physical-system development.",
     accessRole: "MEMBER",
   },
 ];

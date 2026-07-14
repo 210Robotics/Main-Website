@@ -84,14 +84,23 @@ export function MemberCard({
   return (
     <article className="group card interactive-card overflow-hidden">
       <div className="relative aspect-[4/5] overflow-hidden bg-[#181818]">
-        <Image
-          src={member.image}
-          alt={member.name}
-          fill
-          sizes="(max-width:700px) 100vw, 33vw"
-          className="object-cover grayscale-[18%] transition duration-700 group-hover:scale-[1.055] group-hover:grayscale-0"
-        />
-        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black to-transparent" />
+        {member.image ? (
+          <>
+            <Image
+              src={member.image}
+              alt={member.name}
+              fill
+              sizes="(max-width:700px) 100vw, 33vw"
+              className="object-cover grayscale-[18%] transition duration-700 group-hover:scale-[1.055] group-hover:grayscale-0"
+            />
+            <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black to-transparent" />
+          </>
+        ) : (
+          <div className="member-no-photo grid-bg" aria-label="No member photo provided">
+            <span>210</span>
+            <small>MEMBER PROFILE</small>
+          </div>
+        )}
       </div>
       <div className="p-5">
         <h3 className="text-xl font-bold tracking-tight">{member.name}</h3>

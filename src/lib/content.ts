@@ -81,6 +81,7 @@ export type PublicMedia = {
   alt: string;
   caption: string;
   album: string;
+  mediaType: "image" | "video";
 };
 
 export async function getPublicMedia(): Promise<PublicMedia[]> {
@@ -91,6 +92,7 @@ export async function getPublicMedia(): Promise<PublicMedia[]> {
       alt: "210 Robotics students designing and building",
       caption: "Inside the 210 Robotics build process",
       album: index % 2 ? "RoboRowdy" : "Team workshop",
+      mediaType: "image",
     }));
   const rows = await getDb()
     .select()
@@ -104,6 +106,7 @@ export async function getPublicMedia(): Promise<PublicMedia[]> {
         alt: row.alt,
         caption: row.caption,
         album: row.album,
+        mediaType: row.mimeType.startsWith("video/") ? "video" : "image",
       }))
     : galleryImages.map((url, index) => ({
         id: String(index),
@@ -111,5 +114,6 @@ export async function getPublicMedia(): Promise<PublicMedia[]> {
         alt: "210 Robotics students designing and building",
         caption: "Inside the 210 Robotics build process",
         album: "Team workshop",
+        mediaType: "image",
       }));
 }
