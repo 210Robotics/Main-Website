@@ -581,7 +581,7 @@ export async function syncMedia(
     return {
       status: "error",
       message:
-        "Drive could not be refreshed. Check that the service account can open the shared media folder, then try again.",
+        "Drive could not be refreshed. Confirm the shared media folder is set to Anyone with the link can view, then try again.",
     };
   }
 }

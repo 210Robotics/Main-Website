@@ -2,7 +2,7 @@ import "server-only";
 import { GoogleAuth } from "google-auth-library";
 import { put } from "@vercel/blob";
 import sharp from "sharp";
-import { and, eq, isNotNull, notInArray } from "drizzle-orm";
+import { and, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { mediaAssets } from "@/db/schema";
 
@@ -33,6 +33,7 @@ type DriveFile = {
   mimeType: string;
   modifiedTime?: string;
   size?: string;
+  thumbnailUrl?: string;
 };
 type AlbumFile = DriveFile & { album: string };
 
@@ -151,7 +152,7 @@ async function walkAuthenticated(
 async function listPublicFolder(folderId: string): Promise<DriveFile[]> {
   const response = await fetch(
     `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#grid`,
-    { cache: "no-store" },
+    { cache: "no-store", signal: AbortSignal.timeout(12_000) },
   );
   if (!response.ok)
     throw new Error(`The shared Drive folder is not publicly readable (${response.status}).`);
@@ -164,6 +165,7 @@ async function listPublicFolder(folderId: string): Promise<DriveFile[]> {
     if (!id || !title) return [];
     const folder = href.includes("/drive/folders/");
     const iconType = chunk.match(/drive-thirdparty\.googleusercontent\.com\/16\/type\/([^"?]+)/)?.[1];
+    const thumbnailUrl = chunk.match(/flip-entry-thumb"><img src="([^"]+)"/)?.[1];
     return [
       {
         id,
@@ -171,6 +173,7 @@ async function listPublicFolder(folderId: string): Promise<DriveFile[]> {
         mimeType: folder
           ? folderMime
           : decodeURIComponent(iconType ?? "application/octet-stream"),
+        thumbnailUrl: thumbnailUrl?.replace(/&amp;/g, "&"),
       },
     ];
   });
@@ -198,24 +201,28 @@ export async function syncDrivePhotos() {
   const files = token
     ? await walkAuthenticated(rootFolder, token)
     : await walkPublic(rootFolder);
-  const seen: string[] = [];
+  const seen = files.map((file) => file.id);
+  const existingRows = seen.length
+    ? await getDb()
+        .select()
+        .from(mediaAssets)
+        .where(inArray(mediaAssets.driveFileId, seen))
+    : [];
+  const existingByDriveId = new Map(
+    existingRows.map((asset) => [asset.driveFileId, asset]),
+  );
   let imported = 0;
   let skipped = 0;
 
-  for (const file of files) {
-    seen.push(file.id);
+  async function processFile(file: AlbumFile) {
     try {
       const isVideo = isVideoFile(file);
       const sourceLimit = isVideo ? maxVideoBytes : maxImageBytes;
       if (Number(file.size || 0) > sourceLimit) {
         skipped++;
-        continue;
+        return;
       }
-      const [existing] = await getDb()
-        .select()
-        .from(mediaAssets)
-        .where(eq(mediaAssets.driveFileId, file.id))
-        .limit(1);
+      const existing = existingByDriveId.get(file.id);
       if (
         file.modifiedTime &&
         existing?.driveModifiedAt?.toISOString() ===
@@ -223,31 +230,38 @@ export async function syncDrivePhotos() {
         !existing.archivedAt
       ) {
         skipped++;
-        continue;
+        return;
       }
 
-      const response = token
-        ? await fetch(
-            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`,
-            { headers: { authorization: `Bearer ${token}` } },
-          )
-        : await fetch(
-            `https://drive.usercontent.google.com/download?id=${encodeURIComponent(file.id)}&export=download&confirm=t`,
-            { cache: "no-store" },
-          );
-      if (!response.ok) {
+      const publicDownloadUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(file.id)}&export=download&confirm=t`;
+      const renderedHeifUrl =
+        file.thumbnailUrl &&
+        (file.mimeType.includes("heif") ||
+          file.mimeType.includes("heic") ||
+          [".heic", ".heif"].includes(extension(file.name)))
+          ? file.thumbnailUrl.replace(/=s\d+$/, "=s2200")
+          : null;
+      const publicMetadata = token
+        ? null
+        : await fetch(publicDownloadUrl, {
+            method: "HEAD",
+            cache: "no-store",
+            signal: AbortSignal.timeout(12_000),
+          });
+      if (publicMetadata && !publicMetadata.ok) {
         skipped++;
-        continue;
+        return;
       }
-      const responseBytes = Number(response.headers.get("content-length") || 0);
-      if (responseBytes > sourceLimit) {
-        await response.body?.cancel();
+      const metadataBytes = Number(
+        publicMetadata?.headers.get("content-length") || file.size || 0,
+      );
+      if (metadataBytes > sourceLimit) {
         skipped++;
-        continue;
+        return;
       }
       const modifiedAt = new Date(
         file.modifiedTime ||
-          response.headers.get("last-modified") ||
+          publicMetadata?.headers.get("last-modified") ||
           existing?.driveModifiedAt ||
           Date.now(),
       );
@@ -255,9 +269,33 @@ export async function syncDrivePhotos() {
         existing?.driveModifiedAt?.toISOString() === modifiedAt.toISOString() &&
         !existing.archivedAt
       ) {
+        skipped++;
+        return;
+      }
+
+      const response = token
+        ? await fetch(
+            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`,
+            {
+              headers: { authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(20_000),
+            },
+          )
+        : await fetch(renderedHeifUrl || publicDownloadUrl, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(20_000),
+          });
+      if (!response.ok) {
+        skipped++;
+        return;
+      }
+      const responseBytes = Number(
+        response.headers.get("content-length") || metadataBytes,
+      );
+      if (responseBytes > sourceLimit) {
         await response.body?.cancel();
         skipped++;
-        continue;
+        return;
       }
 
       const version = modifiedAt.getTime();
@@ -271,7 +309,7 @@ export async function syncDrivePhotos() {
       if (isVideo) {
         if (!response.body) {
           skipped++;
-          continue;
+          return;
         }
         pathname = `drive/${file.id}-${version}.mp4`;
         const blob = await put(pathname, response.body, {
@@ -287,7 +325,7 @@ export async function syncDrivePhotos() {
         const original = Buffer.from(await response.arrayBuffer());
         if (original.length > maxImageBytes) {
           skipped++;
-          continue;
+          return;
         }
         const image = sharp(original).rotate().resize({
           width: 2200,
@@ -337,6 +375,17 @@ export async function syncDrivePhotos() {
       skipped++;
     }
   }
+
+  let nextFile = 0;
+  async function worker() {
+    while (nextFile < files.length) {
+      const file = files[nextFile++];
+      await processFile(file);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(12, files.length) }, () => worker()),
+  );
 
   if (seen.length)
     await getDb()
