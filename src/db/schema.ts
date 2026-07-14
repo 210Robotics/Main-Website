@@ -101,7 +101,7 @@ export const hourEntries = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     memberId: uuid("member_id")
-      .references(() => members.id)
+      .references(() => members.id, { onDelete: "cascade" })
       .notNull(),
     workDate: timestamp("work_date", { withTimezone: true }).notNull(),
     minutes: integer("minutes").notNull(),
@@ -157,7 +157,7 @@ export const contributions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     memberId: uuid("member_id")
-      .references(() => members.id)
+      .references(() => members.id, { onDelete: "cascade" })
       .notNull(),
     contributionDate: timestamp("contribution_date", {
       withTimezone: true,
@@ -329,11 +329,24 @@ export const calendarSnapshots = pgTable("calendar_snapshots", {
     .notNull(),
 });
 
+export const publicSettings = pgTable("public_settings", {
+  id: text("id").primaryKey().default("site"),
+  memberCountOverrideEnabled: boolean("member_count_override_enabled")
+    .notNull()
+    .default(false),
+  memberCountOverride: integer("member_count_override"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export const auditEvents = pgTable(
   "audit_events",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    actorMemberId: uuid("actor_member_id").references(() => members.id),
+    actorMemberId: uuid("actor_member_id").references(() => members.id, {
+      onDelete: "set null",
+    }),
     action: text("action").notNull(),
     entityType: text("entity_type").notNull(),
     entityId: text("entity_id").notNull(),

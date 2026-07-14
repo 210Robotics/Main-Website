@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/db";
-import { contributions, hourEntries, timeSessions } from "@/db/schema";
+import {
+  contributions,
+  hourEntries,
+  members as memberTable,
+  timeSessions,
+} from "@/db/schema";
 import {
   addContribution,
   addHour,
@@ -22,37 +27,65 @@ export const metadata: Metadata = {
 export default async function PortalPage() {
   if (!hasClerk() || !hasDatabase()) return <SetupNotice />;
   const member = await requireActiveMember();
-  const [hours, work, activeSession] = await Promise.all([
-    getDb()
-      .select()
-      .from(hourEntries)
-      .where(
-        and(eq(hourEntries.memberId, member.id), isNull(hourEntries.deletedAt)),
-      )
-      .orderBy(desc(hourEntries.workDate)),
-    getDb()
-      .select()
-      .from(contributions)
-      .where(
-        and(
-          eq(contributions.memberId, member.id),
-          isNull(contributions.deletedAt),
-        ),
-      )
-      .orderBy(desc(contributions.contributionDate)),
-    getDb()
-      .select()
-      .from(timeSessions)
-      .where(
-        and(
-          eq(timeSessions.memberId, member.id),
-          isNull(timeSessions.clockOut),
-        ),
-      )
-      .orderBy(desc(timeSessions.clockIn))
-      .limit(1),
-  ]);
+  const [hours, work, activeSession, teamMembers, teamHours] =
+    await Promise.all([
+      getDb()
+        .select()
+        .from(hourEntries)
+        .where(
+          and(
+            eq(hourEntries.memberId, member.id),
+            isNull(hourEntries.deletedAt),
+          ),
+        )
+        .orderBy(desc(hourEntries.workDate)),
+      getDb()
+        .select()
+        .from(contributions)
+        .where(
+          and(
+            eq(contributions.memberId, member.id),
+            isNull(contributions.deletedAt),
+          ),
+        )
+        .orderBy(desc(contributions.contributionDate)),
+      getDb()
+        .select()
+        .from(timeSessions)
+        .where(
+          and(
+            eq(timeSessions.memberId, member.id),
+            isNull(timeSessions.clockOut),
+          ),
+        )
+        .orderBy(desc(timeSessions.clockIn))
+        .limit(1),
+      getDb()
+        .select({
+          id: memberTable.id,
+          name: memberTable.displayName,
+          role: memberTable.organizationRole,
+        })
+        .from(memberTable)
+        .where(eq(memberTable.status, "ACTIVE")),
+      getDb()
+        .select({
+          memberId: hourEntries.memberId,
+          minutes: hourEntries.minutes,
+        })
+        .from(hourEntries)
+        .where(isNull(hourEntries.deletedAt)),
+    ]);
   const total = hours.reduce((sum, item) => sum + item.minutes, 0);
+  const totalsByMember = new Map<string, number>();
+  for (const entry of teamHours)
+    totalsByMember.set(
+      entry.memberId,
+      (totalsByMember.get(entry.memberId) ?? 0) + entry.minutes,
+    );
+  const leaderboard = teamMembers
+    .map((item) => ({ ...item, minutes: totalsByMember.get(item.id) ?? 0 }))
+    .sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name));
   return (
     <section className="min-h-screen bg-[#090909] grid-bg">
       <div className="shell py-10">
@@ -87,6 +120,27 @@ export default async function PortalPage() {
                 : null
             }
           />
+        </EntryCard>
+        <EntryCard title="Team hours leaderboard" className="mt-7">
+          <div className="divide-y divide-[#333]">
+            {leaderboard.map((item, index) => (
+              <div
+                className="grid grid-cols-[44px_1fr_auto] items-center gap-4 py-4"
+                key={item.id}
+              >
+                <span className="font-mono text-sm text-[#fd7803]">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div>
+                  <strong>{item.name}</strong>
+                  <p className="mt-1 text-xs text-[#777]">{item.role}</p>
+                </div>
+                <strong className="text-right text-[#fd7803]">
+                  {formatHours(item.minutes)}
+                </strong>
+              </div>
+            ))}
+          </div>
         </EntryCard>
         <div className="mt-7 grid gap-6 xl:grid-cols-2">
           <EntryCard title="Manual hour entry">

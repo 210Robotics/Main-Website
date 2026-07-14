@@ -14,14 +14,19 @@ import { InquiryModal } from "@/components/inquiry-form";
 import { CalendarPreview } from "@/components/interactive-calendar";
 import { MediaGallery } from "@/components/media-gallery";
 import { getCalendarEvents } from "@/lib/calendar";
-import { getPublicMedia, getPublicPosts } from "@/lib/content";
+import {
+  getPublicMedia,
+  getPublicMemberCount,
+  getPublicPosts,
+} from "@/lib/content";
 import { members, programs, sponsors } from "@/lib/site-data";
 
 export default async function Home() {
-  const [events, posts, media] = await Promise.all([
+  const [events, posts, media, memberCount] = await Promise.all([
     getCalendarEvents(),
     getPublicPosts(),
     getPublicMedia(),
+    getPublicMemberCount(),
   ]);
   return (
     <>
@@ -35,7 +40,6 @@ export default async function Home() {
           priority
         />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,#080808_2%,rgba(8,8,8,.92)_48%,rgba(8,8,8,.42)_100%)]" />
-        <div className="hero-circuit" />
         <div className="shell relative z-10 grid min-h-[calc(100vh-74px)] items-center gap-12 py-20 lg:grid-cols-[1.05fr_.95fr]">
           <div className="reveal">
             <p className="eyebrow">UT San Antonio · Student Engineering</p>
@@ -55,23 +59,20 @@ export default async function Home() {
               </Link>
             </div>
           </div>
-          <div className="hero-logo-stage" aria-label="210 Robotics">
-            <div className="hero-logo-orbit" />
-            <div className="hero-logo-glow" />
+          <div className="home-logo-panel" aria-label="210 Robotics">
             <Image
               src="/icon.png"
               alt="210 Robotics logo"
               fill
               sizes="(max-width:1024px) 80vw, 42vw"
-              className="hero-logo-mark object-contain"
+              className="object-contain"
               priority
             />
-            <span className="hero-logo-label">210 // BUILD · LEARN · LEAD</span>
           </div>
         </div>
         <div className="absolute bottom-0 right-0 hidden border-l border-t border-[#333] bg-black/70 backdrop-blur md:grid md:grid-cols-3">
-          <Stat n="01" t="Global SIDC win" />
-          <Stat n="12" t="Core contributors" />
+          <Stat n="03" t="Major programs" />
+          <Stat n={String(memberCount).padStart(2, "0")} t="Current members" />
           <Stat n="01" t="Shared mission" />
         </div>
       </section>
@@ -79,8 +80,8 @@ export default async function Home() {
         <div className="shell">
           <SectionHeading
             eyebrow="Where you can build"
-            title="One organization. Ambitious work."
-            body="Move between hardware, software, design, business, and communication. The best work happens when disciplines collide."
+            title="3 major programs. 1 mission."
+            body="VEX U, SIDC, and RoboRowdy give members different ways to build—connected by one organization and one shared standard of engineering excellence."
           />
           <div className="grid gap-5 lg:grid-cols-3">
             {programs.map((program, index) => (

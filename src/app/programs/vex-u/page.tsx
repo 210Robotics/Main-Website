@@ -28,6 +28,45 @@ export default function VexU() {
           { value: "210", label: "One organization" },
         ]}
       />
+      <section className="section">
+        <div className="shell grid gap-10 lg:grid-cols-[.8fr_1.2fr] lg:items-center">
+          <div>
+            <p className="eyebrow">About VEX U</p>
+            <h2 className="headline">
+              College robotics, engineered under pressure.
+            </h2>
+            <p className="lede mt-6">
+              VEX U is the university division of the VEX Robotics Competition.
+              Student teams design, build, program, and drive advanced V5 robots
+              through a new game every season, balancing autonomous performance,
+              match strategy, reliability, and rapid iteration.
+            </p>
+            <p className="mt-5 text-sm leading-7 text-[#999]">
+              For 2026–27, that game is{" "}
+              <strong className="text-white">Override</strong>. Alliances score
+              by stacking Pins and Cups on Goals, controlling field Toggles, and
+              finishing in the contested Midfield. Each match opens with a
+              15-second autonomous period before 1:45 of driver-controlled play.
+            </p>
+            <a
+              className="button secondary mt-7"
+              href="https://www.vexrobotics.com/override-manual"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Read the official game manual
+            </a>
+          </div>
+          <div className="video-frame">
+            <iframe
+              src="https://www.youtube.com/embed/68NxYIAzbkY"
+              title="VEX V5 Robotics Competition Override 2026–2027 game reveal"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      </section>
       <SplitFeature
         eyebrow="The work"
         title="A full engineering lifecycle."
