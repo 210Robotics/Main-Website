@@ -267,7 +267,6 @@ button {
     ),
     linear-gradient(145deg, rgba(17, 17, 17, 0.94), rgba(0, 0, 0, 0.78));
   overflow: hidden;
-  clip-path: polygon(8% 0, 100% 0, 100% 88%, 92% 100%, 0 100%, 0 12%);
   isolation: isolate;
 }
 .hero-logo-stage::before {

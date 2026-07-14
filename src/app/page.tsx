@@ -36,7 +36,7 @@ export default async function Home() {
           alt="210 Robotics students working in the makerspace"
           fill
           sizes="100vw"
-          className="object-cover opacity-35"
+          className="scale-[1.14] object-cover opacity-35"
           priority
         />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,#080808_2%,rgba(8,8,8,.92)_48%,rgba(8,8,8,.42)_100%)]" />
