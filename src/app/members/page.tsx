@@ -20,27 +20,41 @@ export default async function MembersPage() {
       )
       .orderBy(asc(memberTable.displayName));
     if (rows.length) {
+      const merged = new Map(
+        curated.map((member) => [member.name.toLowerCase(), { ...member }]),
+      );
       const grouped = new Map<string, Member>();
       for (const row of rows) {
-        if (!grouped.has(row.member.id))
+        if (!grouped.has(row.member.id)) {
+          const curatedMatch = merged.get(row.member.displayName.toLowerCase());
           grouped.set(row.member.id, {
-            id: row.member.id,
+            id: curatedMatch?.id ?? row.member.id,
             name: row.member.displayName,
             role: row.member.organizationRole || "Member",
-            projects: [],
-            image: row.member.photoUrl || "/media/brand/team-banner.jpg",
-            bio: row.member.bio,
+            projects: curatedMatch ? [...curatedMatch.projects] : [],
+            image:
+              row.member.photoUrl ||
+              curatedMatch?.image ||
+              "/media/brand/team-banner.jpg",
+            bio: row.member.bio || curatedMatch?.bio || "",
             accessRole: row.member.accessRole,
           });
+        }
         if (
           row.projectName &&
           ["VEX U", "SIDC", "RoboRowdy"].includes(row.projectName)
-        )
-          grouped
-            .get(row.member.id)!
-            .projects.push(row.projectName as Member["projects"][number]);
+        ) {
+          const profile = grouped.get(row.member.id)!;
+          const projectName = row.projectName as Member["projects"][number];
+          if (!profile.projects.includes(projectName))
+            profile.projects.push(projectName);
+        }
       }
-      directory = [...grouped.values()];
+      for (const profile of grouped.values())
+        merged.set(profile.name.toLowerCase(), profile);
+      directory = [...merged.values()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
     }
   }
   return (
