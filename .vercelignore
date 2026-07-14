@@ -1,0 +1,7 @@
+.git
+.next
+.agents
+node_modules
+.env*
+*.tsbuildinfo
+coverage
