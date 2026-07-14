@@ -43,7 +43,7 @@ export function SiteFooter() {
             <a
               aria-label="Instagram"
               className="social-link"
-              href="https://www.instagram.com/210robotics/"
+              href="https://www.instagram.com/210_robotics/"
               target="_blank"
               rel="noreferrer"
             >

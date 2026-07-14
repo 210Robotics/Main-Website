@@ -394,24 +394,59 @@ button {
 .hero-legend-sidc { right: 26px; top: 24px; }
 .hero-legend-rowdy { right: 26px; bottom: 24px; }
 .member-no-photo {
-  display: grid;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 100%;
-  place-content: center;
   text-align: center;
-  color: rgba(255, 255, 255, 0.12);
+  color: #d7d3cc;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(253, 120, 3, 0.12), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.035), transparent 55%);
 }
-.member-no-photo span {
-  font-size: clamp(5rem, 12vw, 8rem);
-  font-weight: 800;
-  letter-spacing: -0.1em;
-  line-height: 0.8;
+.member-no-photo::before,
+.member-no-photo::after {
+  content: "";
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border-color: rgba(253, 120, 3, 0.5);
+}
+.member-no-photo::before {
+  left: 18px;
+  top: 18px;
+  border-left: 1px solid;
+  border-top: 1px solid;
+}
+.member-no-photo::after {
+  right: 18px;
+  bottom: 18px;
+  border-right: 1px solid;
+  border-bottom: 1px solid;
+}
+.member-avatar-frame {
+  display: grid;
+  width: 116px;
+  height: 116px;
+  place-items: center;
+  border: 1px solid rgba(253, 120, 3, 0.62);
+  border-radius: 50%;
+  color: #fd7803;
+  box-shadow: 0 0 44px rgba(253, 120, 3, 0.11);
+}
+.member-no-photo strong {
+  margin-top: 1.65rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
 }
 .member-no-photo small {
-  margin-top: 1.4rem;
+  margin-top: 0.65rem;
   color: #777;
-  font: 700 0.6rem/1 var(--font-mono), monospace;
-  letter-spacing: 0.16em;
+  font: 700 0.56rem/1 var(--font-mono), monospace;
+  letter-spacing: 0.12em;
 }
 .inquiry-dialog {
   width: min(720px, calc(100% - 28px));

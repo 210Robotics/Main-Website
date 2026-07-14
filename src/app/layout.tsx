@@ -18,7 +18,6 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const configured = Boolean(publishableKey);
-  const proxyUrl = publishableKey?.startsWith("pk_live_") ? "/__clerk" : undefined;
   const content = <>
     <a className="skip-link" href="#main-content">Skip to content</a>
     <SiteHeader />
@@ -27,7 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   </>;
   return (
     <html lang="en" className={`${lexend.variable} ${spaceMono.variable}`}>
-      <body>{configured ? <ClerkProvider proxyUrl={proxyUrl}>{content}</ClerkProvider> : content}</body>
+      <body>{configured ? <ClerkProvider>{content}</ClerkProvider> : content}</body>
     </html>
   );
 }

@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, UserRound } from "lucide-react";
 import type { Member } from "@/lib/site-data";
 import { InquiryModal } from "@/components/inquiry-form";
 
@@ -97,8 +97,11 @@ export function MemberCard({
           </>
         ) : (
           <div className="member-no-photo grid-bg" aria-label="No member photo provided">
-            <span>210</span>
-            <small>MEMBER PROFILE</small>
+            <div className="member-avatar-frame">
+              <UserRound aria-hidden="true" size={66} strokeWidth={1.25} />
+            </div>
+            <strong>Profile photo pending</strong>
+            <small>210 ROBOTICS // TEAM MEMBER</small>
           </div>
         )}
       </div>
