@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "time_session_one_active_member_idx" ON "time_sessions" USING btree ("member_id") WHERE "time_sessions"."clock_out" is null;

@@ -2,4 +2,87 @@ import Image from "next/image";
 import Link from "next/link";
 import { Code2, Globe2, Mail, Share2 } from "lucide-react";
 
-export function SiteFooter(){return <footer className="border-t border-[#282828] bg-[#070707]"><div className="shell grid gap-12 py-16 md:grid-cols-[1.5fr_1fr_1fr]"><div><div className="relative h-12 w-44"><Image src="/media/brand/210-banner.png" alt="210 Robotics" fill sizes="176px" className="object-contain object-left"/></div><p className="mt-5 max-w-sm text-sm leading-7 text-[#999]">A student-led robotics organization at UT San Antonio, building ambitious machines and stronger engineers.</p></div><div><p className="eyebrow">Explore</p><div className="mt-5 grid gap-3 text-sm text-[#bbb]"><Link href="/members">Members</Link><Link href="/news">News</Link><Link href="/events">Events</Link><Link href="/media">Media</Link><Link href="/resources">Resources</Link></div></div><div><p className="eyebrow">Connect</p><a className="mt-5 block text-sm text-[#bbb]" href="mailto:admin@210robotics.com">admin@210robotics.com</a><div className="mt-6 flex gap-3"><a aria-label="Instagram" className="grid h-10 w-10 place-items-center border border-[#333]" href="https://www.instagram.com/210robotics"><Share2 size={17}/></a><a aria-label="LinkedIn" className="grid h-10 w-10 place-items-center border border-[#333]" href="https://www.linkedin.com/company/210robotics"><Globe2 size={17}/></a><a aria-label="GitHub" className="grid h-10 w-10 place-items-center border border-[#333]" href="https://github.com/210-Robotics"><Code2 size={17}/></a><a aria-label="Email" className="grid h-10 w-10 place-items-center border border-[#333]" href="mailto:admin@210robotics.com"><Mail size={17}/></a></div></div></div><div className="border-t border-[#242424]"><div className="shell flex flex-wrap justify-between gap-3 py-5 font-mono text-[.65rem] uppercase tracking-wider text-[#777]"><span>© 2026 210 Robotics</span><span>Built by students. Driven by curiosity.</span></div></div></footer>}
+export function SiteFooter() {
+  return (
+    <footer className="border-t border-[#282828] bg-[#070707]">
+      <div className="shell grid gap-12 py-16 md:grid-cols-[1.5fr_1fr_1fr]">
+        <div>
+          <div className="relative h-14 w-48 overflow-hidden bg-black">
+            <Image
+              src="/icon.png"
+              alt="210 Robotics"
+              fill
+              sizes="192px"
+              className="object-cover object-left"
+            />
+          </div>
+          <p className="mt-5 max-w-sm text-sm leading-7 text-[#999]">
+            A student-led robotics organization at UT San Antonio, building
+            ambitious machines and stronger engineers.
+          </p>
+        </div>
+        <div>
+          <p className="eyebrow">Explore</p>
+          <div className="mt-5 grid gap-3 text-sm text-[#bbb]">
+            <Link href="/members">Members</Link>
+            <Link href="/news">News</Link>
+            <Link href="/events">Events</Link>
+            <Link href="/media">Media</Link>
+            <Link href="/resources">Resources</Link>
+          </div>
+        </div>
+        <div>
+          <p className="eyebrow">Connect</p>
+          <a
+            className="mt-5 block text-sm text-[#bbb]"
+            href="mailto:admin@210robotics.com"
+          >
+            admin@210robotics.com
+          </a>
+          <div className="mt-6 flex gap-3">
+            <a
+              aria-label="Instagram"
+              className="social-link"
+              href="https://www.instagram.com/210robotics/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Share2 size={17} />
+            </a>
+            <a
+              aria-label="LinkedIn"
+              className="social-link"
+              href="https://www.linkedin.com/company/210-robotics/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Globe2 size={17} />
+            </a>
+            <a
+              aria-label="GitHub"
+              className="social-link"
+              href="https://github.com/210-Robotics"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Code2 size={17} />
+            </a>
+            <a
+              aria-label="Email"
+              className="social-link"
+              href="mailto:admin@210robotics.com"
+            >
+              <Mail size={17} />
+            </a>
+          </div>
+        </div>
+      </div>
+      <div className="border-t border-[#242424]">
+        <div className="shell flex flex-wrap justify-between gap-3 py-5 font-mono text-[.65rem] uppercase tracking-wider text-[#777]">
+          <span>© 2026 210 Robotics</span>
+          <span>Built by students. Driven by curiosity.</span>
+        </div>
+      </div>
+    </footer>
+  );
+}
