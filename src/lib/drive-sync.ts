@@ -23,14 +23,24 @@ const videoTypes = new Set(["video/mp4"]);
 const allowed = new Set([...imageTypes, ...videoTypes]);
 const maxImageBytes = 20 * 1024 * 1024;
 const maxVideoBytes = 50 * 1024 * 1024;
-const rootFolder = process.env.GOOGLE_DRIVE_PHOTO_FOLDER_ID || "1IHg3ihyrWAotDgLh1_krBtgnKM5L6wXD";
+const rootFolder =
+  process.env.GOOGLE_DRIVE_PHOTO_FOLDER_ID ||
+  "1IHg3ihyrWAotDgLh1_krBtgnKM5L6wXD";
 
-type DriveFile = { id: string; name: string; mimeType: string; modifiedTime?: string; size?: string; parents?: string[] };
+type DriveFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+  size?: string;
+};
+type AlbumFile = DriveFile & { album: string };
 
 export function hasDriveCredentials() {
   return Boolean(
     process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-      (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY),
+      (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
+        process.env.GOOGLE_PRIVATE_KEY),
   );
 }
 
@@ -39,11 +49,38 @@ function extension(name: string) {
 }
 
 function isSupported(file: DriveFile) {
-  return allowed.has(file.mimeType) || [".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".tif", ".tiff", ".heic", ".heif", ".mp4"].includes(extension(file.name));
+  return (
+    allowed.has(file.mimeType) ||
+    [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".avif",
+      ".gif",
+      ".tif",
+      ".tiff",
+      ".heic",
+      ".heif",
+      ".mp4",
+    ].includes(extension(file.name))
+  );
 }
 
 function isVideoFile(file: DriveFile) {
   return videoTypes.has(file.mimeType) || extension(file.name) === ".mp4";
+}
+
+function decodeHtml(value: string) {
+  return value
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 16)),
+    );
 }
 
 function getCredentials() {
@@ -70,47 +107,160 @@ function getCredentials() {
 }
 
 async function accessToken() {
-  const auth = new GoogleAuth({ credentials: getCredentials(), scopes: ["https://www.googleapis.com/auth/drive.readonly"] });
+  const auth = new GoogleAuth({
+    credentials: getCredentials(),
+    scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+  });
   const client = await auth.getClient();
   const token = await client.getAccessToken();
   if (!token.token) throw new Error("Google Drive access token could not be created.");
   return token.token;
 }
 
-async function listFolder(folderId: string, token: string): Promise<DriveFile[]> {
-  const params = new URLSearchParams({ q: `'${folderId}' in parents and trashed = false`, pageSize: "1000", supportsAllDrives: "true", includeItemsFromAllDrives: "true", fields: "files(id,name,mimeType,modifiedTime,size,parents)" });
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, { headers: { authorization: `Bearer ${token}` } });
+async function listAuthenticatedFolder(folderId: string, token: string) {
+  const params = new URLSearchParams({
+    q: `'${folderId}' in parents and trashed = false`,
+    pageSize: "1000",
+    supportsAllDrives: "true",
+    includeItemsFromAllDrives: "true",
+    fields: "files(id,name,mimeType,modifiedTime,size)",
+  });
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files?${params}`,
+    { headers: { authorization: `Bearer ${token}` } },
+  );
   if (!response.ok) throw new Error(`Drive list failed (${response.status}).`);
-  return (await response.json() as { files?: DriveFile[] }).files ?? [];
+  return ((await response.json()) as { files?: DriveFile[] }).files ?? [];
 }
 
-async function walk(folderId: string, token: string, album = "Team photos"): Promise<Array<DriveFile & { album: string }>> {
-  const entries = await listFolder(folderId, token);
-  const result: Array<DriveFile & { album: string }> = [];
+async function walkAuthenticated(
+  folderId: string,
+  token: string,
+  album = "Team photos",
+): Promise<AlbumFile[]> {
+  const entries = await listAuthenticatedFolder(folderId, token);
+  const result: AlbumFile[] = [];
   for (const entry of entries) {
-    if (entry.mimeType === folderMime) result.push(...await walk(entry.id, token, entry.name));
+    if (entry.mimeType === folderMime)
+      result.push(...(await walkAuthenticated(entry.id, token, entry.name)));
+    else if (isSupported(entry)) result.push({ ...entry, album });
+  }
+  return result;
+}
+
+async function listPublicFolder(folderId: string): Promise<DriveFile[]> {
+  const response = await fetch(
+    `https://drive.google.com/embeddedfolderview?id=${encodeURIComponent(folderId)}#grid`,
+    { cache: "no-store" },
+  );
+  if (!response.ok)
+    throw new Error(`The shared Drive folder is not publicly readable (${response.status}).`);
+  const html = await response.text();
+  const chunks = html.split('<div class="flip-entry" id="entry-').slice(1);
+  return chunks.flatMap((chunk) => {
+    const id = chunk.match(/^([^"]+)/)?.[1];
+    const href = chunk.match(/<a href="([^"]+)"/)?.[1] ?? "";
+    const title = chunk.match(/<div class="flip-entry-title">([\s\S]*?)<\/div>/)?.[1];
+    if (!id || !title) return [];
+    const folder = href.includes("/drive/folders/");
+    const iconType = chunk.match(/drive-thirdparty\.googleusercontent\.com\/16\/type\/([^"?]+)/)?.[1];
+    return [
+      {
+        id,
+        name: decodeHtml(title),
+        mimeType: folder
+          ? folderMime
+          : decodeURIComponent(iconType ?? "application/octet-stream"),
+      },
+    ];
+  });
+}
+
+async function walkPublic(
+  folderId: string,
+  album = "Team photos",
+  visited = new Set<string>(),
+): Promise<AlbumFile[]> {
+  if (visited.has(folderId)) return [];
+  visited.add(folderId);
+  const entries = await listPublicFolder(folderId);
+  const result: AlbumFile[] = [];
+  for (const entry of entries) {
+    if (entry.mimeType === folderMime)
+      result.push(...(await walkPublic(entry.id, entry.name, visited)));
     else if (isSupported(entry)) result.push({ ...entry, album });
   }
   return result;
 }
 
 export async function syncDrivePhotos() {
-  const token = await accessToken();
-  const files = await walk(rootFolder, token);
+  const token = hasDriveCredentials() ? await accessToken() : null;
+  const files = token
+    ? await walkAuthenticated(rootFolder, token)
+    : await walkPublic(rootFolder);
   const seen: string[] = [];
   let imported = 0;
   let skipped = 0;
+
   for (const file of files) {
     seen.push(file.id);
     try {
       const isVideo = isVideoFile(file);
       const sourceLimit = isVideo ? maxVideoBytes : maxImageBytes;
-      if (Number(file.size || 0) > sourceLimit) { skipped++; continue; }
-      const [existing] = await getDb().select().from(mediaAssets).where(eq(mediaAssets.driveFileId, file.id)).limit(1);
-      if (existing?.driveModifiedAt?.toISOString() === new Date(file.modifiedTime || 0).toISOString() && !existing.archivedAt) { skipped++; continue; }
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`, { headers: { authorization: `Bearer ${token}` } });
-      if (!response.ok) { skipped++; continue; }
-      const version = new Date(file.modifiedTime || Date.now()).getTime();
+      if (Number(file.size || 0) > sourceLimit) {
+        skipped++;
+        continue;
+      }
+      const [existing] = await getDb()
+        .select()
+        .from(mediaAssets)
+        .where(eq(mediaAssets.driveFileId, file.id))
+        .limit(1);
+      if (
+        file.modifiedTime &&
+        existing?.driveModifiedAt?.toISOString() ===
+          new Date(file.modifiedTime).toISOString() &&
+        !existing.archivedAt
+      ) {
+        skipped++;
+        continue;
+      }
+
+      const response = token
+        ? await fetch(
+            `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`,
+            { headers: { authorization: `Bearer ${token}` } },
+          )
+        : await fetch(
+            `https://drive.usercontent.google.com/download?id=${encodeURIComponent(file.id)}&export=download&confirm=t`,
+            { cache: "no-store" },
+          );
+      if (!response.ok) {
+        skipped++;
+        continue;
+      }
+      const responseBytes = Number(response.headers.get("content-length") || 0);
+      if (responseBytes > sourceLimit) {
+        await response.body?.cancel();
+        skipped++;
+        continue;
+      }
+      const modifiedAt = new Date(
+        file.modifiedTime ||
+          response.headers.get("last-modified") ||
+          existing?.driveModifiedAt ||
+          Date.now(),
+      );
+      if (
+        existing?.driveModifiedAt?.toISOString() === modifiedAt.toISOString() &&
+        !existing.archivedAt
+      ) {
+        await response.body?.cancel();
+        skipped++;
+        continue;
+      }
+
+      const version = modifiedAt.getTime();
       let pathname: string;
       let blobUrl: string;
       let mimeType: string;
@@ -119,33 +269,84 @@ export async function syncDrivePhotos() {
       let bytes: number;
 
       if (isVideo) {
-        if (!response.body) { skipped++; continue; }
+        if (!response.body) {
+          skipped++;
+          continue;
+        }
         pathname = `drive/${file.id}-${version}.mp4`;
-        const blob = await put(pathname, response.body, { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType: "video/mp4" });
+        const blob = await put(pathname, response.body, {
+          access: "public",
+          addRandomSuffix: false,
+          allowOverwrite: true,
+          contentType: "video/mp4",
+        });
         blobUrl = blob.url;
         mimeType = "video/mp4";
-        bytes = Number(file.size || response.headers.get("content-length") || 0);
+        bytes = Number(file.size || responseBytes || 0);
       } else {
         const original = Buffer.from(await response.arrayBuffer());
-        if (original.length > maxImageBytes) { skipped++; continue; }
-        const image = sharp(original).rotate().resize({ width: 2200, height: 2200, fit: "inside", withoutEnlargement: true });
+        if (original.length > maxImageBytes) {
+          skipped++;
+          continue;
+        }
+        const image = sharp(original).rotate().resize({
+          width: 2200,
+          height: 2200,
+          fit: "inside",
+          withoutEnlargement: true,
+        });
         const metadata = await image.metadata();
         const optimized = await image.webp({ quality: 84 }).toBuffer();
         pathname = `drive/${file.id}-${version}.webp`;
-        const blob = await put(pathname, optimized, { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType: "image/webp" });
+        const blob = await put(pathname, optimized, {
+          access: "public",
+          addRandomSuffix: false,
+          allowOverwrite: true,
+          contentType: "image/webp",
+        });
         blobUrl = blob.url;
         mimeType = "image/webp";
         width = metadata.width;
         height = metadata.height;
         bytes = optimized.length;
       }
-      const values = { driveFileId: file.id, driveModifiedAt: new Date(file.modifiedTime || Date.now()), blobUrl, pathname, filename: file.name, mimeType, alt: `210 Robotics — ${file.album}`, caption: "", album: file.album, width, height, bytes, published: true, archivedAt: null, updatedAt: new Date() };
-      await getDb().insert(mediaAssets).values(values).onConflictDoUpdate({ target: mediaAssets.driveFileId, set: values });
+      const values = {
+        driveFileId: file.id,
+        driveModifiedAt: modifiedAt,
+        blobUrl,
+        pathname,
+        filename: file.name,
+        mimeType,
+        alt: `210 Robotics — ${file.album}`,
+        caption: "",
+        album: file.album,
+        width,
+        height,
+        bytes,
+        published: true,
+        archivedAt: null,
+        updatedAt: new Date(),
+      };
+      await getDb()
+        .insert(mediaAssets)
+        .values(values)
+        .onConflictDoUpdate({ target: mediaAssets.driveFileId, set: values });
       imported++;
-    } catch {
+    } catch (error) {
+      console.error(`Drive media sync skipped ${file.id}`, error);
       skipped++;
     }
   }
-  if (seen.length) await getDb().update(mediaAssets).set({ archivedAt: new Date(), published: false, updatedAt: new Date() }).where(and(isNotNull(mediaAssets.driveFileId), notInArray(mediaAssets.driveFileId, seen)));
+
+  if (seen.length)
+    await getDb()
+      .update(mediaAssets)
+      .set({ archivedAt: new Date(), published: false, updatedAt: new Date() })
+      .where(
+        and(
+          isNotNull(mediaAssets.driveFileId),
+          notInArray(mediaAssets.driveFileId, seen),
+        ),
+      );
   return { discovered: files.length, imported, skipped };
 }

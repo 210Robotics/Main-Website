@@ -18,7 +18,7 @@ import {
   publicSettings,
 } from "@/db/schema";
 import { requireActiveMember, requirePermission } from "@/lib/auth";
-import { hasDriveCredentials, syncDrivePhotos } from "@/lib/drive-sync";
+import { syncDrivePhotos } from "@/lib/drive-sync";
 import { hasPermission, permissionKeys, rolePresets } from "@/lib/permissions";
 
 async function assignProjects(memberId: string, slugs: string[]) {
@@ -560,12 +560,6 @@ export async function syncMedia(
   void _previousState;
   void _formData;
   const actor = await requirePermission("media.manage");
-  if (!hasDriveCredentials())
-    return {
-      status: "error",
-      message:
-        "Drive is not connected to Vercel yet. Add the Google service-account credential and share the media folder with that account.",
-    };
   try {
     const result = await syncDrivePhotos();
     await getDb().insert(auditEvents).values({
