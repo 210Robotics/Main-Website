@@ -27,6 +27,13 @@ const rootFolder = process.env.GOOGLE_DRIVE_PHOTO_FOLDER_ID || "1IHg3ihyrWAotDgL
 
 type DriveFile = { id: string; name: string; mimeType: string; modifiedTime?: string; size?: string; parents?: string[] };
 
+export function hasDriveCredentials() {
+  return Boolean(
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
+      (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY),
+  );
+}
+
 function extension(name: string) {
   return name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
 }
@@ -40,9 +47,25 @@ function isVideoFile(file: DriveFile) {
 }
 
 function getCredentials() {
+  const serviceAccountJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (serviceAccountJson) {
+    const decoded = serviceAccountJson.trim().startsWith("{")
+      ? serviceAccountJson
+      : Buffer.from(serviceAccountJson, "base64").toString("utf8");
+    const credentials = JSON.parse(decoded) as {
+      client_email?: string;
+      private_key?: string;
+    };
+    if (credentials.client_email && credentials.private_key)
+      return {
+        client_email: credentials.client_email,
+        private_key: credentials.private_key.replace(/\\n/g, "\n"),
+      };
+  }
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!clientEmail || !privateKey) throw new Error("Google Drive service account credentials are not configured.");
+  if (!clientEmail || !privateKey)
+    throw new Error("Google Drive service account credentials are not configured.");
   return { client_email: clientEmail, private_key: privateKey };
 }
 

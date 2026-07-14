@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
+import { DriveSyncForm } from "@/components/drive-sync-form";
 import { desc, eq, isNull } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/db";
 import {
@@ -21,7 +22,6 @@ import {
   deleteMember,
   deletePost,
   suspendMember,
-  syncMedia,
   updatePost,
   updatePublicMemberCount,
   updateInquiry,
@@ -630,9 +630,7 @@ export default async function AdminPage() {
                 folder. New images publish automatically after validation and
                 optimization.
               </p>
-              <form action={syncMedia}>
-                <button className="button">Sync Drive photos</button>
-              </form>
+              <DriveSyncForm />
             </div>
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
               {mediaRows.map((asset) => (
@@ -640,13 +638,19 @@ export default async function AdminPage() {
                   className="relative aspect-square overflow-hidden border border-[#333]"
                   key={asset.id}
                 >
-                  <Image
-                    className="object-cover"
-                    src={asset.blobUrl}
-                    alt={asset.alt}
-                    fill
-                    sizes="160px"
-                  />
+                  {asset.mimeType.startsWith("video/") ? (
+                    <video className="h-full w-full object-cover" controls preload="metadata">
+                      <source src={asset.blobUrl} type={asset.mimeType} />
+                    </video>
+                  ) : (
+                    <Image
+                      className="object-cover"
+                      src={asset.blobUrl}
+                      alt={asset.alt}
+                      fill
+                      sizes="160px"
+                    />
+                  )}
                 </div>
               ))}
             </div>

@@ -18,7 +18,7 @@ import {
   publicSettings,
 } from "@/db/schema";
 import { requireActiveMember, requirePermission } from "@/lib/auth";
-import { syncDrivePhotos } from "@/lib/drive-sync";
+import { hasDriveCredentials, syncDrivePhotos } from "@/lib/drive-sync";
 import { hasPermission, permissionKeys, rolePresets } from "@/lib/permissions";
 
 async function assignProjects(memberId: string, slugs: string[]) {
@@ -548,19 +548,48 @@ export async function updatePublicMemberCount(formData: FormData) {
   revalidatePath("/");
 }
 
-export async function syncMedia() {
+export type SyncMediaState = {
+  status: "idle" | "success" | "error";
+  message: string;
+};
+
+export async function syncMedia(
+  _previousState: SyncMediaState,
+  _formData: FormData,
+): Promise<SyncMediaState> {
+  void _previousState;
+  void _formData;
   const actor = await requirePermission("media.manage");
-  const result = await syncDrivePhotos();
-  await getDb().insert(auditEvents).values({
-    actorMemberId: actor.id,
-    action: "media.drive_synced",
-    entityType: "media",
-    entityId: "drive",
-    details: result,
-  });
-  revalidatePath("/admin");
-  revalidatePath("/media");
-  revalidatePath("/");
+  if (!hasDriveCredentials())
+    return {
+      status: "error",
+      message:
+        "Drive is not connected to Vercel yet. Add the Google service-account credential and share the media folder with that account.",
+    };
+  try {
+    const result = await syncDrivePhotos();
+    await getDb().insert(auditEvents).values({
+      actorMemberId: actor.id,
+      action: "media.drive_synced",
+      entityType: "media",
+      entityId: "drive",
+      details: result,
+    });
+    revalidatePath("/admin");
+    revalidatePath("/media");
+    revalidatePath("/");
+    return {
+      status: "success",
+      message: `Refresh complete: ${result.imported} imported, ${result.skipped} unchanged or skipped, ${result.discovered} found.`,
+    };
+  } catch (error) {
+    console.error("Manual Drive media sync failed", error);
+    return {
+      status: "error",
+      message:
+        "Drive could not be refreshed. Check that the service account can open the shared media folder, then try again.",
+    };
+  }
 }
 
 export async function assertAdmin() {
