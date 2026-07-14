@@ -45,14 +45,15 @@ export async function POST(request: Request) {
 
   if (input.website) return Response.json({ ok: true, id: created.id });
   const resend = getResend();
-  const recipients = ["admin@210robotics.com", input.email.toLowerCase()];
+  const notificationEmail = "admin@210robotics.com";
+  const recipients = [...new Set([notificationEmail, input.email.toLowerCase()])];
   await db.insert(emailDeliveries).values(recipients.map((recipient) => ({ inquiryId: created.id, recipient })));
   if (!resend) return Response.json({ ok: true, id: created.id, emailPending: true });
 
   const from = process.env.INQUIRY_FROM_EMAIL || "210 Robotics Website <website@updates.210robotics.com>";
   const sends = [
-    { recipient: recipients[0], subject: `New ${input.kind} inquiry from ${input.name}`, html: adminInquiryEmail(input), replyTo: input.email },
-    { recipient: recipients[1], subject: "210 Robotics received your message", html: confirmationEmail(input.name, input.kind), replyTo: "admin@210robotics.com" },
+    { recipient: notificationEmail, subject: `New ${input.kind} inquiry from ${input.name}`, html: adminInquiryEmail(input), replyTo: input.email },
+    ...(input.email.toLowerCase() === notificationEmail ? [] : [{ recipient: input.email.toLowerCase(), subject: "210 Robotics received your message", html: confirmationEmail(input.name, input.kind), replyTo: notificationEmail }]),
   ];
   for (const delivery of sends) {
     const { data, error } = await resend.emails.send({ from, to: delivery.recipient, subject: delivery.subject, html: delivery.html, replyTo: delivery.replyTo }, { idempotencyKey: `inquiry-${created.id}-${delivery.recipient}` });
