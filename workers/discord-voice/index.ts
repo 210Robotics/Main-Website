@@ -131,6 +131,81 @@ function validStartRequest(value: unknown): value is StartRequest {
   );
 }
 
+function validSpeechRequest(value: unknown): value is SpeechRequest {
+  if (!value || typeof value !== "object") return false;
+  const input = value as Partial<SpeechRequest>;
+  return Boolean(
+    /^\d{15,22}$/.test(input.guildId || "") &&
+      /^\d{15,22}$/.test(input.channelId || "") &&
+      typeof input.requestedByMemberId === "string" &&
+      input.requestedByMemberId.length >= 10 &&
+      typeof input.text === "string" &&
+      input.text.trim().length >= 1 &&
+      input.text.trim().length <= MAX_SPEECH_CHARACTERS,
+  );
+}
+
+async function runProcess(executable: string, args: string[]) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(executable, args, { windowsHide: true });
+    let errorOutput = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      errorOutput = (errorOutput + chunk.toString()).slice(-4_000);
+    });
+    child.on("error", reject);
+    child.on("close", (code: number | null) => {
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(
+            `${executable} exited with code ${code}: ${errorOutput || "no error details"}`,
+          ),
+        );
+    });
+  });
+}
+
+async function enqueueSpeech(guildId: string, task: () => Promise<void>) {
+  const previous = speechQueues.get(guildId) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  speechQueues.set(guildId, next);
+  try {
+    await next;
+  } finally {
+    if (speechQueues.get(guildId) === next) speechQueues.delete(guildId);
+  }
+}
+
+async function playSpeech({
+  connection,
+  text,
+  directory,
+}: {
+  connection: VoiceConnection;
+  text: string;
+  directory: string;
+}) {
+  const speechPath = join(directory, `speech-${randomUUID()}.wav`);
+  await runProcess("espeak-ng", [
+    "-v",
+    "en-us",
+    "-s",
+    "155",
+    "-a",
+    "165",
+    "-w",
+    speechPath,
+    text.trim(),
+  ]);
+  const player = createAudioPlayer({
+    behaviors: { noSubscriber: NoSubscriberBehavior.Play },
+  });
+  connection.subscribe(player);
+  player.play(createAudioResource(speechPath));
+  await entersState(player, AudioPlayerStatus.Playing, 15_000);
+  await entersState(player, AudioPlayerStatus.Idle, 90_000);
+}
+
 function humanCount(channel: VoiceBasedChannel) {
   return channel.members.filter((member) => !member.user.bot).size;
 }
@@ -350,13 +425,9 @@ function updateEmptyChannelTimer(session: RecordingSession) {
   }
 }
 
-async function startSession(input: StartRequest) {
-  if (!client.isReady()) throw new Error("Discord is still connecting.");
-  if (sessions.has(input.guildId)) {
-    throw new Error("This server already has an active voice recording.");
-  }
-  const guild = await client.guilds.fetch(input.guildId);
-  const channel = await guild.channels.fetch(input.channelId);
+async function getVoiceChannel(guildId: string, channelId: string) {
+  const guild = await client.guilds.fetch(guildId);
+  const channel = await guild.channels.fetch(channelId);
   if (
     !channel ||
     !channel.isVoiceBased() ||
@@ -366,6 +437,72 @@ async function startSession(input: StartRequest) {
   ) {
     throw new Error("Select a voice or stage channel the bot can join.");
   }
+  return { guild, channel };
+}
+
+async function speakInChannel(input: SpeechRequest) {
+  if (!client.isReady()) throw new Error("Discord is still connecting.");
+  await enqueueSpeech(input.guildId, async () => {
+    const { guild, channel } = await getVoiceChannel(
+      input.guildId,
+      input.channelId,
+    );
+    const activeSession = sessions.get(input.guildId);
+    if (activeSession?.finishing) {
+      throw new Error(
+        "Wait for the active recording to finish processing before speaking.",
+      );
+    }
+    if (activeSession && activeSession.channelId !== input.channelId) {
+      throw new Error(
+        `The bot is recording in ${activeSession.channel.name}. Speak there or stop the recording first.`,
+      );
+    }
+    const directory = await mkdtemp(join(tmpdir(), "210-discord-speech-"));
+    const connection =
+      activeSession?.connection ||
+      joinVoiceChannel({
+        guildId: guild.id,
+        channelId: channel.id,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: true,
+        selfMute: false,
+      });
+    const ownsConnection = !activeSession;
+    try {
+      if (ownsConnection) {
+        await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      }
+      await playSpeech({
+        connection,
+        text: input.text,
+        directory,
+      });
+    } finally {
+      if (ownsConnection) connection.destroy();
+      await rm(directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
+  });
+  return {
+    channelName: (
+      await client.guilds
+        .fetch(input.guildId)
+        .then((guild) => guild.channels.fetch(input.channelId))
+    )?.name,
+  };
+}
+
+async function startSession(input: StartRequest) {
+  if (!client.isReady()) throw new Error("Discord is still connecting.");
+  if (sessions.has(input.guildId)) {
+    throw new Error("This server already has an active voice recording.");
+  }
+  const { guild, channel } = await getVoiceChannel(
+    input.guildId,
+    input.channelId,
+  );
   const tempDirectory = await mkdtemp(
     join(tmpdir(), "210-discord-voice-"),
   );
@@ -374,9 +511,24 @@ async function startSession(input: StartRequest) {
     channelId: channel.id,
     adapterCreator: guild.voiceAdapterCreator,
     selfDeaf: false,
-    selfMute: true,
+    selfMute: false,
   });
-  await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+  try {
+    await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+    await enqueueSpeech(input.guildId, () =>
+      playSpeech({
+        connection,
+        text: RECORDING_NOTICE,
+        directory: tempDirectory,
+      }),
+    );
+  } catch (error) {
+    connection.destroy();
+    await rm(tempDirectory, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
+    throw error;
+  }
   const session: RecordingSession = {
     ...input,
     id: randomUUID(),
@@ -498,6 +650,7 @@ const server = createServer(async (request, response) => {
     return json(response, 200, {
       ok: client.isReady(),
       activeRecordings: sessions.size,
+      speechReady: true,
     });
   }
   if (!authorized(request)) {
@@ -543,6 +696,47 @@ const server = createServer(async (request, response) => {
       });
     }
   }
+  if (
+    request.method === "POST" &&
+    request.url === "/recordings/stop-all"
+  ) {
+    const activeSessions = [...sessions.values()].filter(
+      (session) => !session.finishing,
+    );
+    for (const session of activeSessions) {
+      void finishSession(session, "administrator-stop-all");
+    }
+    return json(response, 202, {
+      ok: true,
+      stopped: activeSessions.length,
+      message: activeSessions.length
+        ? `${activeSessions.length} recording${activeSessions.length === 1 ? "" : "s"} are being finalized and transcribed.`
+        : "There were no active recordings to stop.",
+    });
+  }
+  if (request.method === "POST" && request.url === "/speech") {
+    try {
+      const input = await requestJson(request);
+      if (!validSpeechRequest(input)) {
+        return json(response, 400, {
+          error:
+            "A valid guild, voice channel, requester, and message of 500 characters or fewer are required.",
+        });
+      }
+      const result = await speakInChannel(input);
+      return json(response, 200, {
+        ok: true,
+        message: `The bot spoke in ${result.channelName || "the selected voice channel"}.`,
+      });
+    } catch (error) {
+      return json(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "The bot could not speak in that voice channel.",
+      });
+    }
+  }
   return json(response, 404, { error: "Not found" });
 });
 
@@ -565,4 +759,19 @@ async function main() {
 }
 
 process.on("SIGTERM", () => {
-  for (const se
+  for (const session of sessions.values()) {
+    void finishSession(session, "worker-shutdown");
+  }
+  server.close();
+  client.destroy();
+});
+
+void main().catch((error) => {
+  console.error(
+    JSON.stringify({
+      event: "discord.voice.worker_failed",
+      error: error instanceof Error ? error.message : String(error),
+    }),
+  );
+  process.exitCode = 1;
+});
