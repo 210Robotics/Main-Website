@@ -34,6 +34,10 @@ import {
   membershipDuesStatuses,
 } from "@/lib/membership-dues";
 import {
+  speakDiscordVoiceMessage,
+  stopAllDiscordVoiceRecordings,
+} from "@/lib/discord-voice-worker";
+import {
   MAX_MEETING_RECORDING_BYTES,
   allowedMeetingRecordingTypes,
   transcribeAndArchiveMeeting,
@@ -579,7 +583,7 @@ export async function connectDiscordGuildWithState(
     if (syncWarning) {
       return {
         status: "warning",
-        message: `The six slash commands were installed successfully. ${syncWarning}`,
+        message: `${commands.length} slash commands were installed successfully. ${syncWarning}`,
       };
     }
     return {
@@ -741,6 +745,93 @@ export async function sendDiscordAdminMessage(
     return {
       status: "error",
       message: friendlyDiscordConnectionError(error),
+    };
+  }
+}
+
+export async function sendDiscordVoiceSpeech(
+  _previousState: DiscordMessageState,
+  formData: FormData,
+): Promise<DiscordMessageState> {
+  try {
+    const actor = await requirePermission("integrations.manage");
+    const guildId = required(formData, "guildId");
+    const channelId = required(formData, "channelId");
+    const text = required(formData, "text").slice(0, 500);
+    if (!/^\d{15,22}$/.test(guildId) || !/^\d{15,22}$/.test(channelId)) {
+      return {
+        status: "error",
+        message: "Select a valid Discord voice channel.",
+      };
+    }
+    const channels = await listDiscordVoiceChannels(guildId);
+    const channel = channels.find((candidate) => candidate.id === channelId);
+    if (!channel) {
+      return {
+        status: "error",
+        message: "The bot cannot access that Discord voice channel.",
+      };
+    }
+    const result = await speakDiscordVoiceMessage({
+      guildId,
+      channelId,
+      text,
+      requestedByMemberId: actor.id,
+    });
+    await getDb().insert(auditEvents).values({
+      actorMemberId: actor.id,
+      action: "DISCORD_VOICE_SPEECH",
+      entityType: "discord_channel",
+      entityId: channelId,
+      details: {
+        guildId,
+        channelName: channel.name,
+        characterCount: text.length,
+      },
+    });
+    return {
+      status: "success",
+      message: result.message,
+    };
+  } catch (error) {
+    console.error("Discord voice speech failed", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "The bot could not speak in that voice channel.",
+    };
+  }
+}
+
+export async function stopAllDiscordRecordings(
+  _previousState: DiscordMessageState,
+  formData: FormData,
+): Promise<DiscordMessageState> {
+  try {
+    const actor = await requirePermission("integrations.manage");
+    const guildId = required(formData, "guildId");
+    const result = await stopAllDiscordVoiceRecordings();
+    await getDb().insert(auditEvents).values({
+      actorMemberId: actor.id,
+      action: "DISCORD_RECORDINGS_STOP_ALL",
+      entityType: "discord_guild",
+      entityId: guildId,
+      details: { stopped: result.stopped },
+    });
+    return {
+      status: "success",
+      message: result.message,
+    };
+  } catch (error) {
+    console.error("Discord recording stop-all failed", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "The active Discord recordings could not be stopped.",
     };
   }
 }

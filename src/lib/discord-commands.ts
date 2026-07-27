@@ -34,6 +34,11 @@ export const discordApplicationCommands = [
     ],
   },
   {
+    name: "stopall",
+    description: "Stop and finalize every active voice recording",
+    default_member_permissions: "8",
+  },
+  {
     name: "sync",
     description: "Synchronize Discord members and messages with the portal",
     default_member_permissions: "8",

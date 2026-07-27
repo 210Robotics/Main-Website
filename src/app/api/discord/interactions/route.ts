@@ -27,6 +27,7 @@ import { generateGeminiText } from "@/lib/team-ai";
 import {
   discordVoiceWorkerConfiguration,
   startDiscordVoiceRecording,
+  stopAllDiscordVoiceRecordings,
 } from "@/lib/discord-voice-worker";
 
 export const runtime = "nodejs";
@@ -240,9 +241,14 @@ export async function POST(request: Request) {
     });
 
     if (
-      ["sync", "logs", "calendar", "digest", "timeout"].includes(
-        commandName,
-      ) &&
+      [
+        "sync",
+        "logs",
+        "calendar",
+        "digest",
+        "timeout",
+        "stopall",
+      ].includes(commandName) &&
       !isAdministrator(interaction.member?.permissions)
     ) {
       return interactionResponse(
@@ -442,6 +448,43 @@ export async function POST(request: Request) {
       return deferredInteractionResponse();
     }
 
+    if (commandName === "stopall") {
+      if (!discordVoiceWorkerConfiguration().configured) {
+        return interactionResponse(
+          "The always-on Discord voice recorder worker is not connected.",
+        );
+      }
+      const applicationId =
+        interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+      const interactionToken = interaction.token || "";
+      if (!applicationId || !interactionToken) {
+        return interactionResponse(
+          "Discord did not provide enough information to stop the recordings.",
+        );
+      }
+      after(async () => {
+        try {
+          const result = await stopAllDiscordVoiceRecordings();
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content: result.message,
+          });
+        } catch (error) {
+          console.error("Discord voice recording stop-all failed", error);
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content:
+              error instanceof Error
+                ? error.message
+                : "The Discord voice recorder could not stop all sessions.",
+          }).catch(() => undefined);
+        }
+      });
+      return deferredInteractionResponse();
+    }
+
     if (commandName === "register") {
       if (guildMember.linkedMemberId) {
         return interactionResponse(
@@ -549,7 +592,7 @@ export async function POST(request: Request) {
       );
     }
     return interactionResponse(
-      "Unknown command. Try /ask, /record, /sync, /logs, /calendar, /digest, /timeout, /register, /status, /dues, or /team.",
+      "Unknown command. Try /ask, /record, /stopall, /sync, /logs, /calendar, /digest, /timeout, /register, /status, /dues, or /team.",
     );
   } catch (error) {
     console.error("Discord interaction failed", error);
