@@ -7,6 +7,7 @@ import {
   CircuitBoard,
   Factory,
   GraduationCap,
+  Heart,
   Trophy,
 } from "lucide-react";
 import { CTA, MemberCard, SectionHeading } from "@/components/ui";
@@ -18,21 +19,35 @@ import {
   getPublicMedia,
   getPublicMemberCount,
   getPublicPosts,
+  getPublicSponsors,
 } from "@/lib/content";
-import { members, programs, sponsors } from "@/lib/site-data";
+import { members, programs } from "@/lib/site-data";
+import { getWebsitePageContent } from "@/lib/site-content";
 
 export default async function Home() {
-  const [events, posts, media, memberCount] = await Promise.all([
+  const [events, posts, media, memberCount, sponsors, content] = await Promise.all([
     getCalendarEvents(),
     getPublicPosts(),
     getPublicMedia(),
     getPublicMemberCount(),
+    getPublicSponsors(),
+    getWebsitePageContent("home"),
   ]);
+  const programCards = programs.map((program, index) => {
+    const number = index + 1;
+    return {
+      ...program,
+      eyebrow: content[`program${number}Eyebrow`],
+      title: content[`program${number}Title`],
+      description: content[`program${number}Body`],
+      image: content[`program${number}Image`],
+    };
+  });
   return (
     <>
       <section className="home-hero grid-bg">
         <Image
-          src="/media/brand/makerspace.png"
+          src={content.heroImage}
           alt="210 Robotics students working in the makerspace"
           fill
           sizes="100vw"
@@ -42,16 +57,16 @@ export default async function Home() {
         <div className="absolute inset-0 bg-[linear-gradient(90deg,#080808_2%,rgba(8,8,8,.92)_48%,rgba(8,8,8,.42)_100%)]" />
         <div className="shell relative z-10 grid min-h-[calc(100vh-74px)] items-center gap-12 py-20 lg:grid-cols-[1.05fr_.95fr]">
           <div className="reveal">
-            <p className="eyebrow">UT San Antonio · Student Engineering</p>
+            <p className="eyebrow">{content.heroEyebrow}</p>
             <h1 className="display max-w-[880px]">
-              Build what <span className="accent">comes next.</span>
+              {content.heroTitle} <span className="accent">{content.heroAccent}</span>
             </h1>
-            <p className="lede mt-7 max-w-2xl">
-              We are 210 Robotics—a student-led team designing competition
-              robots, autonomous systems, and a place for ambitious builders to
-              grow.
-            </p>
+            <p className="lede mt-7 max-w-2xl">{content.heroBody}</p>
             <div className="mt-9 flex flex-wrap gap-3">
+              <Link className="button" href="/donate">
+                <Heart aria-hidden="true" size={16} />
+                Support 210
+              </Link>
               <InquiryModal kind="join" label="Join the team" />
               <Link className="button secondary" href="/about">
                 Discover 210
@@ -92,15 +107,15 @@ export default async function Home() {
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="Where you can build"
-            title="3 major programs. 1 mission."
-            body="VEX U, SIDC, and RoboRowdy give members different ways to build—connected by one organization and one shared standard of engineering excellence."
+            eyebrow={content.programsEyebrow}
+            title={content.programsTitle}
+            body={content.programsBody}
           />
           <div className="grid gap-5 lg:grid-cols-3">
-            {programs.map((program, index) => (
+            {programCards.map((program, index) => (
               <Link
                 href={program.href}
-                key={program.title}
+                key={program.href}
                 className="group card block overflow-hidden transition hover:-translate-y-1 hover:border-[#fd7803]/60"
               >
                 <div className="relative h-64 overflow-hidden">
@@ -145,21 +160,17 @@ export default async function Home() {
         <div className="shell grid gap-12 lg:grid-cols-[.8fr_1.2fr] lg:items-center">
           <div>
             <Trophy className="text-[#fd7803]" size={42} />
-            <p className="eyebrow mt-7">Global winner</p>
-            <h2 className="headline">RoboRowdy won SIDC.</h2>
-            <p className="lede mt-6">
-              The Siemens Immersive Design Challenge win recognized a complete
-              autonomous workflow for more productive, sustainable industrial
-              3D-print farms.
-            </p>
+            <p className="eyebrow mt-7">{content.winnerEyebrow}</p>
+            <h2 className="headline">{content.winnerTitle}</h2>
+            <p className="lede mt-6">{content.winnerBody}</p>
             <Link className="button mt-8" href="/programs/sidc">
-              Explore the winning project
+              {content.winnerButton}
               <ArrowRight size={16} />
             </Link>
           </div>
           <div className="relative min-h-[500px] overflow-hidden border border-[#fd7803]/40">
             <Image
-              src="https://news.utsa.edu/wp-content/uploads/2026/07/robo-rowdy-detroit.jpg"
+              src={content.winnerImage}
               alt="The RoboRowdy team at Siemens Realize LIVE in Detroit"
               fill
               sizes="(max-width:1024px) 100vw, 60vw"
@@ -175,9 +186,9 @@ export default async function Home() {
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="Shared team calendar"
-            title="Build days, reviews, and workshops."
-            body="The public calendar is synchronized directly from Google Calendar in Central Time."
+            eyebrow={content.calendarEyebrow}
+            title={content.calendarTitle}
+            body={content.calendarBody}
             action={{ label: "Full calendar", href: "/events" }}
           />
           <CalendarPreview events={events} />
@@ -186,13 +197,9 @@ export default async function Home() {
       <section className="section border-y border-[#282828] bg-[#0d0d0d] grid-bg">
         <div className="shell grid gap-14 lg:grid-cols-[.8fr_1.2fr]">
           <div>
-            <p className="eyebrow">Engineers are made</p>
-            <h2 className="headline">Your major is only the beginning.</h2>
-            <p className="lede mt-6">
-              The team is a working laboratory: design reviews, failure
-              analysis, fabrication, software releases, sponsor conversations,
-              and competition pressure.
-            </p>
+            <p className="eyebrow">{content.learningEyebrow}</p>
+            <h2 className="headline">{content.learningTitle}</h2>
+            <p className="lede mt-6">{content.learningBody}</p>
             <div className="mt-9 grid grid-cols-2 gap-px bg-[#333]">
               <Mini icon={<CircuitBoard />} title="Design" />
               <Mini icon={<Bot />} title="Build" />
@@ -202,7 +209,7 @@ export default async function Home() {
           </div>
           <div className="relative min-h-[520px] overflow-hidden border border-[#fd7803]/40">
             <Image
-              src="/media/gallery/vexu/vexu-4.jpg"
+              src={content.learningImage}
               alt="Students collaborating on a robotics project"
               fill
               sizes="(max-width:1024px) 100vw, 60vw"
@@ -212,8 +219,7 @@ export default async function Home() {
             <div className="absolute bottom-0 p-7">
               <span className="tag">Hands-on from day one</span>
               <p className="mt-4 max-w-lg text-xl font-semibold leading-8">
-                No experience requirement. We teach the tools, pair new members
-                with project leads, and put ideas into motion.
+                {content.learningCaption}
               </p>
             </div>
           </div>
@@ -222,9 +228,9 @@ export default async function Home() {
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="Media library"
-            title="The work is better up close."
-            body="Photos from the shared team Drive show the process—not just the finished result."
+            eyebrow={content.mediaEyebrow}
+            title={content.mediaTitle}
+            body={content.mediaBody}
             action={{ label: "Open gallery", href: "/media" }}
           />
           <MediaGallery items={media} limit={6} />
@@ -233,9 +239,9 @@ export default async function Home() {
       <section className="section border-y border-[#282828] bg-[#0d0d0d]">
         <div className="shell">
           <SectionHeading
-            eyebrow="Meet the team"
-            title="Student-led means student-built."
-            body="Organization officers create the systems, culture, and momentum that let every member do their best work."
+            eyebrow={content.teamEyebrow}
+            title={content.teamTitle}
+            body={content.teamBody}
             action={{ label: "Full team", href: "/members" }}
           />
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -251,8 +257,8 @@ export default async function Home() {
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="Field notes"
-            title="From the shop floor."
+            eyebrow={content.newsEyebrow}
+            title={content.newsTitle}
             action={{ label: "All stories", href: "/news" }}
           />
           <div className="grid gap-5 md:grid-cols-3">
@@ -299,7 +305,7 @@ export default async function Home() {
           />
           <div className="grid gap-px bg-[#2b2b2b] sm:grid-cols-3">
             {sponsors.map((sponsor) => (
-              <div className="bg-[#0d0d0d] p-8" key={sponsor.name}>
+              <div className="bg-[#0d0d0d] p-8" key={sponsor.id}>
                 <div className="relative h-24">
                   <Image
                     src={sponsor.image}

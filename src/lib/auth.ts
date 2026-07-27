@@ -4,7 +4,11 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getDb, hasDatabase } from "@/db";
 import { members } from "@/db/schema";
-import { hasPermission, type PermissionKey } from "@/lib/permissions";
+import {
+  canAccessAdmin,
+  hasPermission,
+  type PermissionKey,
+} from "@/lib/permissions";
 
 export function hasClerk() {
   return Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY);
@@ -16,7 +20,6 @@ async function findOrCreateMember(userId: string) {
   const user = await currentUser();
   const email = user?.primaryEmailAddress?.emailAddress?.toLowerCase();
   if (!user || !email) return null;
-  if (user.externalAccounts.length && !user.passwordEnabled) throw new Error("Social sign-in is not available. Use email and password.");
   const [emailMatch] = await getDb()
     .select()
     .from(members)
@@ -58,5 +61,17 @@ export async function requireActiveMember() {
 export async function requirePermission(permission: PermissionKey) {
   const member = await requireActiveMember();
   if (!hasPermission(member.accessRole, permission, member.permissionOverrides)) redirect("/portal");
+  return member;
+}
+
+export async function requireAdminAccess() {
+  const member = await requireActiveMember();
+  if (
+    !canAccessAdmin(
+      member.accessRole,
+      member.permissionOverrides,
+    )
+  )
+    redirect("/portal");
   return member;
 }

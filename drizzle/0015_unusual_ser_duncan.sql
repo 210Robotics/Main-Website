@@ -1,0 +1,1 @@
+ALTER TABLE "public_settings" ADD COLUMN "custom_pages" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -1,0 +1,3 @@
+ALTER TABLE "donations" ADD COLUMN "attributed_member_id" uuid;--> statement-breakpoint
+ALTER TABLE "donations" ADD CONSTRAINT "donations_attributed_member_id_members_id_fk" FOREIGN KEY ("attributed_member_id") REFERENCES "public"."members"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "donation_attributed_member_idx" ON "donations" USING btree ("attributed_member_id","paid_at");

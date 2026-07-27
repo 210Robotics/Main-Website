@@ -8,10 +8,12 @@ import {
   auditEvents,
   contributions,
   hourEntries,
+  mediaAssets,
   members,
   timeSessions,
 } from "@/db/schema";
 import { requireActiveMember } from "@/lib/auth";
+import { cleanupMediaIfUnused } from "@/lib/media";
 
 const hourSchema = z.object({
   date: z.string().date(),
@@ -202,21 +204,50 @@ export async function deleteContribution(id: string) {
   revalidatePath("/portal");
 }
 
-export async function updateProfile(formData: FormData) {
+export type ProfileFormState = {
+  status: "idle" | "success" | "error";
+  message: string;
+  errors?: Record<string, string[]>;
+};
+
+export async function updateProfile(
+  _previousState: ProfileFormState,
+  formData: FormData,
+): Promise<ProfileFormState> {
   const member = await requireActiveMember();
   const parsed = z
     .object({
       displayName: z.string().trim().min(2).max(100),
       bio: z.string().trim().max(700),
-      photoUrl: z.union([z.url(), z.literal("")]),
+      photoMediaId: z.union([z.uuid(), z.literal("")]),
+      removePhoto: z.string().optional(),
     })
-    .parse(Object.fromEntries(formData));
+    .safeParse(Object.fromEntries(formData));
+  if (!parsed.success)
+    return {
+      status: "error",
+      message: "Please correct the highlighted profile fields.",
+      errors: parsed.error.flatten().fieldErrors,
+    };
+  const data = parsed.data;
+  if (data.photoMediaId) {
+    const [owned] = await getDb()
+      .select({ id: mediaAssets.id })
+      .from(mediaAssets)
+      .where(and(eq(mediaAssets.id, data.photoMediaId), eq(mediaAssets.uploadedByMemberId, member.id)))
+      .limit(1);
+    if (!owned) return { status: "error", message: "The selected image could not be verified." };
+  }
+  const oldMediaId = member.photoMediaId;
+  const changingPhoto = Boolean(data.photoMediaId) || data.removePhoto === "on";
   await getDb()
     .update(members)
     .set({
-      displayName: parsed.displayName,
-      bio: parsed.bio,
-      photoUrl: parsed.photoUrl || null,
+      displayName: data.displayName,
+      bio: data.bio,
+      ...(changingPhoto
+        ? { photoMediaId: data.photoMediaId || null, photoUrl: null }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(members.id, member.id));
@@ -230,4 +261,8 @@ export async function updateProfile(formData: FormData) {
     });
   revalidatePath("/portal");
   revalidatePath("/members");
+  revalidatePath("/team");
+  if (changingPhoto && oldMediaId !== data.photoMediaId)
+    await cleanupMediaIfUnused(oldMediaId);
+  return { status: "success", message: "Profile saved." };
 }

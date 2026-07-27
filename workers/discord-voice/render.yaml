@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: 210-robotics-discord-voice-worker
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_VOICE_WORKER_SECRET
+        sync: false
+      - key: SITE_URL
+        value: https://210robotics.com

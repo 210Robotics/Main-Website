@@ -2,9 +2,10 @@ import "server-only";
 import { GoogleAuth } from "google-auth-library";
 import { put } from "@vercel/blob";
 import sharp from "sharp";
-import { and, inArray, isNotNull, notInArray } from "drizzle-orm";
+import { and, inArray, isNotNull, isNull, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { mediaAssets } from "@/db/schema";
+import { galleryEvents, mediaAssets } from "@/db/schema";
+import { DELETED_GALLERY_MEDIA_SOURCE } from "@/lib/media-policy";
 
 const folderMime = "application/vnd.google-apps.folder";
 const imageTypes = new Set([
@@ -35,7 +36,7 @@ type DriveFile = {
   size?: string;
   thumbnailUrl?: string;
 };
-type AlbumFile = DriveFile & { album: string };
+type AlbumFile = DriveFile & { album: string; galleryEventId?: string | null };
 
 export function hasDriveCredentials() {
   return Boolean(
@@ -107,10 +108,12 @@ function getCredentials() {
   return { client_email: clientEmail, private_key: privateKey };
 }
 
-async function accessToken() {
+export async function getDriveAccessToken(
+  scopes: string[] = ["https://www.googleapis.com/auth/drive.readonly"],
+) {
   const auth = new GoogleAuth({
     credentials: getCredentials(),
-    scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+    scopes,
   });
   const client = await auth.getClient();
   const token = await client.getAccessToken();
@@ -197,10 +200,35 @@ async function walkPublic(
 }
 
 export async function syncDrivePhotos() {
-  const token = hasDriveCredentials() ? await accessToken() : null;
-  const files = token
+  const token = hasDriveCredentials() ? await getDriveAccessToken() : null;
+  const rootFiles = token
     ? await walkAuthenticated(rootFolder, token)
     : await walkPublic(rootFolder);
+  const eventRows = await getDb()
+    .select({
+      id: galleryEvents.id,
+      title: galleryEvents.title,
+      driveFolderId: galleryEvents.driveFolderId,
+    })
+    .from(galleryEvents)
+    .where(isNull(galleryEvents.archivedAt));
+  const eventFileGroups = await Promise.all(
+    eventRows.map(async (event) => {
+        if (!event.driveFolderId) return [];
+        const eventFiles = token
+          ? await walkAuthenticated(event.driveFolderId, token, event.title)
+          : await walkPublic(event.driveFolderId, event.title);
+        return eventFiles.map((file) => ({
+          ...file,
+          album: event.title,
+          galleryEventId: event.id,
+        }));
+      }),
+  );
+  const fileById = new Map<string, AlbumFile>();
+  for (const file of rootFiles) fileById.set(file.id, file);
+  for (const file of eventFileGroups.flat()) fileById.set(file.id, file);
+  const files = [...fileById.values()];
   const seen = files.map((file) => file.id);
   const existingRows = seen.length
     ? await getDb()
@@ -223,6 +251,10 @@ export async function syncDrivePhotos() {
         return;
       }
       const existing = existingByDriveId.get(file.id);
+      if (existing?.source === DELETED_GALLERY_MEDIA_SOURCE) {
+        skipped++;
+        return;
+      }
       if (
         file.modifiedTime &&
         existing?.driveModifiedAt?.toISOString() ===
@@ -358,6 +390,7 @@ export async function syncDrivePhotos() {
         alt: `210 Robotics — ${file.album}`,
         caption: "",
         album: file.album,
+        galleryEventId: file.galleryEventId || null,
         width,
         height,
         bytes,

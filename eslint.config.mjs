@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated vendor documentation is served as-is and is not app source.
+    "public/doxygen/**",
   ]),
 ]);
 

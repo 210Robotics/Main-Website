@@ -1,26 +1,33 @@
 import type { Metadata } from "next";
 import { CTA, MemberCard, PageHero, SectionHeading } from "@/components/ui";
-import { facultyAdvisor, members } from "@/lib/site-data";
+import { getPublicPortalMembers, getRosterCards } from "@/lib/public-people";
+import { getWebsitePageContent } from "@/lib/site-content";
 export const metadata: Metadata = { title: "Team" };
-export default function Team() {
-  const officers = members.filter((member) => member.role !== "Member");
-  const contributors = members.filter((member) =>
-    member.projects.includes("SIDC"),
-  );
+export const dynamic = "force-dynamic";
+export default async function Team() {
+  const [officers, contributors, advisors, portalMembers, content] = await Promise.all([
+    getRosterCards("TEAM", "leadership"),
+    getRosterCards("TEAM", "contributors"),
+    getRosterCards("TEAM", "advisor"),
+    getPublicPortalMembers(),
+    getWebsitePageContent("team"),
+  ]);
+  const mentors = portalMembers.filter((member) => member.accessRole === "MENTOR");
+  const members = portalMembers.filter((member) => member.accessRole !== "MENTOR");
   return (
     <>
       <PageHero
-        eyebrow="The people of 210"
-        title="Every machine is a team effort."
-        body="Officers set organization-wide direction. Members bring the curiosity and craft that make every system work."
-        image="/media/brand/siemens-team.png"
+        eyebrow={content.heroEyebrow}
+        title={content.heroTitle}
+        body={content.heroBody}
+        image={content.heroImage}
       />
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="Organization leadership"
-            title="Built and led by students."
-            body="These titles apply across all of 210 Robotics—not to a separate branch."
+            eyebrow={content.leadershipEyebrow}
+            title={content.leadershipTitle}
+            body={content.leadershipBody}
           />
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {officers.map((member) => (
@@ -32,16 +39,16 @@ export default function Team() {
       <section className="section border-y border-[#282828] bg-[#0d0d0d]">
         <div className="shell">
           <SectionHeading
-            eyebrow="Winning project"
-            title="RoboRowdy contributors."
-            body="People who also serve as organization officers appear again here with their SIDC project responsibility."
+            eyebrow={content.contributorsEyebrow}
+            title={content.contributorsTitle}
+            body={content.contributorsBody}
           />
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {contributors.map((member) => (
               <MemberCard
                 key={member.id}
                 member={member}
-                role={member.sidcRole ?? "Project Contributor"}
+                role={member.role}
               />
             ))}
           </div>
@@ -50,12 +57,58 @@ export default function Team() {
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="Faculty support"
-            title="Guidance that helps the team grow."
+            eyebrow={content.advisorsEyebrow}
+            title={content.advisorsTitle}
           />
-          <div className="max-w-sm">
-            <MemberCard member={facultyAdvisor} />
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {advisors.map((member) => <MemberCard key={member.id} member={member} />)}
           </div>
+        </div>
+      </section>
+      <nav className="border-t border-[#282828] bg-[#0d0d0d]" aria-label="Team directory sections">
+        <div className="shell flex flex-wrap gap-2 py-6">
+          <a className="tag transition-colors hover:border-[#fd7803] hover:text-white" href="#members">Members</a>
+          <a className="tag transition-colors hover:border-[#fd7803] hover:text-white" href="#mentors">Mentors</a>
+        </div>
+      </nav>
+      <section id="members" className="section scroll-mt-24 bg-[#0d0d0d]">
+        <div className="shell">
+          <SectionHeading
+            eyebrow={content.membersEyebrow}
+            title={content.membersTitle}
+            body={content.membersBody}
+            action={{ label: "View member directory", href: "/members" }}
+          />
+          {members.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {members.map((member) => (
+                <div className="card flex items-center gap-4 p-5" key={member.id}>
+                  <div>
+                    <strong>{member.name}</strong>
+                    <p className="mt-1 text-sm text-[#fd7803]">{member.role}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="card p-6 text-sm text-[#999]">Approved public member profiles will appear here.</p>
+          )}
+        </div>
+      </section>
+      <section id="mentors" className="section scroll-mt-24 border-t border-[#282828]">
+        <div className="shell">
+          <SectionHeading
+            eyebrow={content.mentorsEyebrow}
+            title={content.mentorsTitle}
+            body={content.mentorsBody}
+          />
+          {mentors.length ? (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {mentors.map((mentor) => <MemberCard key={mentor.id} member={mentor} />)}
+            </div>
+          ) : (
+            <p className="card p-6 text-sm text-[#999]">Approved public mentor profiles will appear here.</p>
+          )}
         </div>
       </section>
       <CTA />

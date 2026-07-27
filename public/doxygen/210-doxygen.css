@@ -1,0 +1,89 @@
+:root {
+  --robotics-orange: #fd7803;
+  --robotics-surface: #101010;
+  --robotics-border: #36312d;
+}
+
+html,
+html.light-mode,
+html.dark-mode {
+  --page-link-color: var(--robotics-orange);
+  --page-visited-link-color: #ff9a47;
+  --page-external-link-color: #ffb06d;
+  --header-separator-color: #5a2d0a;
+  --group-header-color: var(--robotics-orange);
+  --icon-background-color: var(--robotics-orange);
+  --label-background-color: #b75000;
+  --nav-text-active-color: var(--robotics-orange);
+}
+
+body {
+  font-family: "Lexend", "Segoe UI", system-ui, sans-serif;
+}
+
+.robotics-docs-bar {
+  position: relative;
+  z-index: 1000;
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--robotics-border);
+  background: #0b0b0b;
+  color: #f4f1ea;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 24%);
+}
+
+.robotics-docs-bar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: #f4f1ea;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+}
+
+.robotics-docs-bar__brand img {
+  width: 76px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.robotics-docs-bar__links {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.robotics-docs-bar__links a {
+  color: #aaa;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.robotics-docs-bar__links a:hover,
+.robotics-docs-bar__links a:focus-visible {
+  color: var(--robotics-orange);
+}
+
+#projectname {
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+@media (max-width: 640px) {
+  .robotics-docs-bar {
+    gap: 10px;
+    padding-inline: 12px;
+  }
+
+  .robotics-docs-bar__brand span,
+  .robotics-docs-bar__links a:last-child {
+    display: none;
+  }
+}

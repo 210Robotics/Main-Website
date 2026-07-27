@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Lexend, Space_Mono } from "next/font/google";
-import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
+import { SiteChrome } from "@/components/site-chrome";
+import { clerkAppearance } from "@/lib/clerk-appearance";
 import "./globals.css";
 
 const lexend = Lexend({ variable: "--font-lexend", subsets: ["latin"] });
@@ -18,15 +18,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const configured = Boolean(publishableKey);
-  const content = <>
-    <a className="skip-link" href="#main-content">Skip to content</a>
-    <SiteHeader />
-    <main id="main-content">{children}</main>
-    <SiteFooter />
-  </>;
+  const content = <SiteChrome>{children}</SiteChrome>;
   return (
-    <html lang="en" className={`${lexend.variable} ${spaceMono.variable}`}>
-      <body>{configured ? <ClerkProvider>{content}</ClerkProvider> : content}</body>
+    <html lang="en" className={`${lexend.variable} ${spaceMono.variable}`} data-scroll-behavior="smooth">
+      <body>{configured ? <ClerkProvider appearance={clerkAppearance} signInFallbackRedirectUrl="/portal" signUpForceRedirectUrl="/pending">{content}</ClerkProvider> : content}</body>
     </html>
   );
 }

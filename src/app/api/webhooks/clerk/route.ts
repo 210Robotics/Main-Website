@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/db";
 import { members } from "@/db/schema";
+import { notifyDiscordAdmin } from "@/lib/discord";
 
 export const runtime = "nodejs";
 
@@ -27,8 +28,7 @@ export async function POST(request: NextRequest) {
           .update(members)
           .set({
             clerkUserId: data.id,
-            displayName,
-            photoUrl: data.image_url || null,
+            email,
             updatedAt: new Date(),
           })
           .where(eq(members.id, emailMatch.id));
@@ -42,7 +42,16 @@ export async function POST(request: NextRequest) {
           accessRole: isOwner ? "SUPER_ADMIN" : "MEMBER",
           organizationRole: isOwner ? "President" : "Member",
           isPublic: isOwner,
-        }).onConflictDoUpdate({ target: members.clerkUserId, set: { email, displayName, photoUrl: data.image_url || null, updatedAt: new Date() } });
+        }).onConflictDoUpdate({ target: members.clerkUserId, set: { email, updatedAt: new Date() } });
+        if (!isOwner) {
+          await notifyDiscordAdmin({
+            title: "Pending member account",
+            body: `${displayName} (${email}) created a portal account and is waiting for approval.`,
+            path: "/admin?tab=members",
+          }).catch((error: unknown) =>
+            console.error("Discord pending-account notification failed", error),
+          );
+        }
       }
     }
     if (event.type === "user.deleted" && event.data.id) {

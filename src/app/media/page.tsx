@@ -2,6 +2,39 @@ import type { Metadata } from "next";
 import { MediaGallery } from "@/components/media-gallery";
 import { PageHero, SectionHeading } from "@/components/ui";
 import { getPublicMedia } from "@/lib/content";
+import { getWebsitePageContent } from "@/lib/site-content";
 
-export const metadata:Metadata={title:"Media"};
-export default async function MediaPage(){const media=await getPublicMedia();return <><PageHero eyebrow="Media library" title="Inside the build." body="Meetings, design reviews, prototypes, competition preparation, and the people who make it all happen." image="/media/brand/makerspace.png"/><section className="section"><div className="shell"><SectionHeading eyebrow="Shared Drive gallery" title="Work worth seeing." body="New approved photos and MP4 videos synchronize from the 210 Robotics shared Drive and publish here automatically. HEIC, HEIF, AVIF, TIFF, GIF, JPG, PNG, and WebP photos are converted for reliable browser viewing."/><MediaGallery items={media}/></div></section></>}
+export const metadata: Metadata = { title: "Media" };
+
+export default async function MediaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ event?: string | string[] }>;
+}) {
+  const [media, content, query] = await Promise.all([
+    getPublicMedia(),
+    getWebsitePageContent("media"),
+    searchParams,
+  ]);
+  const requestedEvent = Array.isArray(query.event) ? query.event[0] : query.event;
+  return (
+    <>
+      <PageHero
+        eyebrow={content.heroEyebrow}
+        title={content.heroTitle}
+        body={content.heroBody}
+        image={content.heroImage}
+      />
+      <section className="section">
+        <div className="shell">
+          <SectionHeading
+            eyebrow={content.galleryEyebrow}
+            title={content.galleryTitle}
+            body={content.galleryBody}
+          />
+          <MediaGallery items={media} groupByEvent initialEventKey={requestedEvent || null} />
+        </div>
+      </section>
+    </>
+  );
+}

@@ -1,0 +1,27 @@
+var classpros_1_1v5_1_1AIVision =
+[
+    [ "Code", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga50c6a6b10c20a404fbb8d88de5a6a435", null ],
+    [ "Color", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga74c306772758cca50d9de357ebefb4f9", null ],
+    [ "Object", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaee8c28aba86242c71622612e4278df4c", null ],
+    [ "AIVision", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaa4fd97834fe05668ca76616d2cc9a626", null ],
+    [ "AIVision", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaad3f7756e909cb9547599fab3bebca92", null ],
+    [ "disable_detection_types", "d1/de2/classpros_1_1v5_1_1AIVision.html#gae3020d04d11fb8f1ebd76c5cafaae1b1", null ],
+    [ "disable_detection_types", "d1/de2/classpros_1_1v5_1_1AIVision.html#gabe942ed5e1949e3608d9e209b4f99e45", null ],
+    [ "enable_detection_types", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga1e645a9a0260e4ea4e11d75a7c7688fc", null ],
+    [ "enable_detection_types", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga6f0d2b46b8ee682e021c0c4a9352ed5a", null ],
+    [ "get_all_devices", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaa3685f9624bbae4268a1835d3b63f752", null ],
+    [ "get_all_objects", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaa2bc0dea774f05f414c71ba187a14de3", null ],
+    [ "get_class_name", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga1515d7fa471f4da195603f6f218474f4", null ],
+    [ "get_class_name", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaaeef5df67edf6961f4a3841b7284500c", null ],
+    [ "get_code", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga8dc53c01b290895b1651a2ccbaeb1cce", null ],
+    [ "get_color", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga7b403de00c23ee52406bfd8b62f78e9f", null ],
+    [ "get_enabled_detection_types", "d1/de2/classpros_1_1v5_1_1AIVision.html#gaa9f55a6acb77f482749fadc7af4f0706", null ],
+    [ "get_object", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga307bbca259c7c01d9064c9eedb935b5f", null ],
+    [ "get_object_count", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga5d02ba3504b5c88d7fee4c8f81b93fa0", null ],
+    [ "is_type", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga7fe92ee860b6dee6c15adf92121c83c3", null ],
+    [ "reset", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga2197b07bcd70a0e90c920a210048d759", null ],
+    [ "set_code", "d1/de2/classpros_1_1v5_1_1AIVision.html#gace8f5b1f717631b2ca64a835164a9c64", null ],
+    [ "set_color", "d1/de2/classpros_1_1v5_1_1AIVision.html#ga01e2d0ba8a484c7afbd75dd38c160b2a", null ],
+    [ "set_tag_family", "d1/de2/classpros_1_1v5_1_1AIVision.html#gad809b0387c503e66ecadcc85438d3117", null ],
+    [ "start_awb", "d1/de2/classpros_1_1v5_1_1AIVision.html#gadef4396e9a205bfe3c28b0eae58edc63", null ]
+];

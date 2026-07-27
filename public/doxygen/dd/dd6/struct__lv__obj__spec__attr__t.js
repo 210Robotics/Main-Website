@@ -1,0 +1,26 @@
+var struct__lv__obj__spec__attr__t =
+[
+    [ "child_cnt", "dd/dd6/struct__lv__obj__spec__attr__t.html#a4e00767c29ba01c4f7be7e4ca5f1d52f", null ],
+    [ "child_cnt", "dd/dd6/struct__lv__obj__spec__attr__t.html#aea0c42ef9bbc1bd4c8036b9040916227", null ],
+    [ "children", "dd/dd6/struct__lv__obj__spec__attr__t.html#a24899261813fe9686805031d6e753145", null ],
+    [ "children", "dd/dd6/struct__lv__obj__spec__attr__t.html#a830956e2db9be9586862e2f5b2bfd3ab", null ],
+    [ "event_dsc", "dd/dd6/struct__lv__obj__spec__attr__t.html#a41c8f14eb458a527ce93ddb14228d2e6", null ],
+    [ "event_dsc_cnt", "dd/dd6/struct__lv__obj__spec__attr__t.html#afbd96383fc9f21a0f97cc04bcb5dd4cd", null ],
+    [ "event_list", "dd/dd6/struct__lv__obj__spec__attr__t.html#a6f4b36ecfd30a87a83548f859a39a8ce", null ],
+    [ "ext_click_pad", "dd/dd6/struct__lv__obj__spec__attr__t.html#a3254cf494f1cc0806aa8ccdda1a3ea83", null ],
+    [ "ext_click_pad", "dd/dd6/struct__lv__obj__spec__attr__t.html#a607669983b8ee9736f87d2cdedf7f84b", null ],
+    [ "ext_draw_size", "dd/dd6/struct__lv__obj__spec__attr__t.html#a73aca9ce51fdd07c6266ed5c2dba6aa7", null ],
+    [ "ext_draw_size", "dd/dd6/struct__lv__obj__spec__attr__t.html#a8751c3848b0f1936f8b94e505d72b37e", null ],
+    [ "group_p", "dd/dd6/struct__lv__obj__spec__attr__t.html#a505fd41b5eda4032d824dd542b4dd93e", null ],
+    [ "layer_type", "dd/dd6/struct__lv__obj__spec__attr__t.html#a093233c957f2e68bb1a47760adebdc86", null ],
+    [ "layer_type", "dd/dd6/struct__lv__obj__spec__attr__t.html#a18fd132b27282d978f302110f998a0c5", null ],
+    [ "scroll", "dd/dd6/struct__lv__obj__spec__attr__t.html#a777cd35b43ca269c6d695a1578fec43e", null ],
+    [ "scroll_dir", "dd/dd6/struct__lv__obj__spec__attr__t.html#a85052ac92f99a5fc31c6e737b1fb2541", null ],
+    [ "scroll_dir", "dd/dd6/struct__lv__obj__spec__attr__t.html#a07a7eee70fce90366daf8f2b9bc93d37", null ],
+    [ "scroll_snap_x", "dd/dd6/struct__lv__obj__spec__attr__t.html#a258fb40ccbbef31fd83d1fb7b0c61434", null ],
+    [ "scroll_snap_x", "dd/dd6/struct__lv__obj__spec__attr__t.html#ad746130f0e4c869148b111533ee8fac8", null ],
+    [ "scroll_snap_y", "dd/dd6/struct__lv__obj__spec__attr__t.html#a0062a0595d0ea326aae1a0ab49785202", null ],
+    [ "scroll_snap_y", "dd/dd6/struct__lv__obj__spec__attr__t.html#a34aa5c8534706fc9fb69e968f112bc58", null ],
+    [ "scrollbar_mode", "dd/dd6/struct__lv__obj__spec__attr__t.html#a1172b4fc8c2ebce6d338d693990550fc", null ],
+    [ "scrollbar_mode", "dd/dd6/struct__lv__obj__spec__attr__t.html#a0d2d47438e2e6ce048f5b28c6a650a9b", null ]
+];

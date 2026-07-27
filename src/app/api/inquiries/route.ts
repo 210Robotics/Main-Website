@@ -3,6 +3,7 @@ import { and, count, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, hasDatabase } from "@/db";
 import { emailDeliveries, inquiries } from "@/db/schema";
+import { notifyDiscordAdmin } from "@/lib/discord";
 import { adminInquiryEmail, confirmationEmail, getResend } from "@/lib/email";
 
 export const runtime = "nodejs";
@@ -44,6 +45,13 @@ export async function POST(request: Request) {
   }).returning({ id: inquiries.id });
 
   if (input.website) return Response.json({ ok: true, id: created.id });
+  await notifyDiscordAdmin({
+    title: `New ${input.kind} inbox message`,
+    body: `${input.name} (${input.email}) submitted a new ${input.kind} inquiry.`,
+    path: "/admin?tab=inbox",
+  }).catch((error: unknown) =>
+    console.error("Discord inquiry notification failed", error),
+  );
   const resend = getResend();
   const notificationEmail = "admin@210robotics.com";
   const recipients = [...new Set([notificationEmail, input.email.toLowerCase()])];

@@ -1,0 +1,27 @@
+var classBasicIStreamWrapper =
+[
+    [ "Ch", "d3/d91/classBasicIStreamWrapper.html#a88e4288ecdaa0d31ddf4e5917b9aa8d7", null ],
+    [ "BasicIStreamWrapper", "d3/d91/classBasicIStreamWrapper.html#a3e9a2dd2b6b28243f8f2a911f67cdf56", null ],
+    [ "BasicIStreamWrapper", "d3/d91/classBasicIStreamWrapper.html#a7a87c6702f1e98256de416ee101a460f", null ],
+    [ "BasicIStreamWrapper", "d3/d91/classBasicIStreamWrapper.html#a1c72528bd8783cbf79928efbddac0a30", null ],
+    [ "BasicIStreamWrapper", "d3/d91/classBasicIStreamWrapper.html#a15a415adfc281dc08fe37513f330dc0c", null ],
+    [ "Flush", "d3/d91/classBasicIStreamWrapper.html#a37d5e4cd8fdf3c83dad50737e95886a9", null ],
+    [ "operator=", "d3/d91/classBasicIStreamWrapper.html#a7ffdbf9a1beb1e9f9f78ce9ea3f8bf9c", null ],
+    [ "Peek", "d3/d91/classBasicIStreamWrapper.html#a0ad1488235b4786dd4f7a16e679dec88", null ],
+    [ "Peek4", "d3/d91/classBasicIStreamWrapper.html#a461ed82951afefd68ce9ba446031aa60", null ],
+    [ "Put", "d3/d91/classBasicIStreamWrapper.html#afa71cb2f5b7668837d0a81e3bce55e69", null ],
+    [ "PutBegin", "d3/d91/classBasicIStreamWrapper.html#a10999721c014eea987d28a1ef9762351", null ],
+    [ "PutEnd", "d3/d91/classBasicIStreamWrapper.html#ab2ead53490207a1cb0bdd674a03957f3", null ],
+    [ "Read", "d3/d91/classBasicIStreamWrapper.html#a14f7e115ff06dbf8dda561d156641633", null ],
+    [ "Take", "d3/d91/classBasicIStreamWrapper.html#afb71f0329d0abbbc9b22ebeb5c1464d1", null ],
+    [ "Tell", "d3/d91/classBasicIStreamWrapper.html#ac212848265f937add49bd973de794e25", null ],
+    [ "buffer_", "d3/d91/classBasicIStreamWrapper.html#afcec6ce42add3ff03bbc8f48b1684234", null ],
+    [ "bufferLast_", "d3/d91/classBasicIStreamWrapper.html#a2e3dcf3716b8525b314b95e4dd67a820", null ],
+    [ "bufferSize_", "d3/d91/classBasicIStreamWrapper.html#a592532cbc0b32f0a7b43800997a898d2", null ],
+    [ "count_", "d3/d91/classBasicIStreamWrapper.html#abdc3fc20e4c6e50a8bca468b457b9b79", null ],
+    [ "current_", "d3/d91/classBasicIStreamWrapper.html#a7c7a177cfffd2793855d160cc0d427c0", null ],
+    [ "eof_", "d3/d91/classBasicIStreamWrapper.html#afc35bf604fac076468d3801f85604210", null ],
+    [ "peekBuffer_", "d3/d91/classBasicIStreamWrapper.html#ae85be0f5472085497a21a7e135aba09d", null ],
+    [ "readCount_", "d3/d91/classBasicIStreamWrapper.html#aa603c5540319d160fea25702620213ac", null ],
+    [ "stream_", "d3/d91/classBasicIStreamWrapper.html#a08cb5cad6653f35761ef1cdcaa407aa9", null ]
+];

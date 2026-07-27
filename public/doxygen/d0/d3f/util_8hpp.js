@@ -1,0 +1,85 @@
+var util_8hpp =
+[
+    [ "ez::pose", "d7/db0/structez_1_1pose.html", "d7/db0/structez_1_1pose" ],
+    [ "ez::united_pose", "d4/d52/structez_1_1united__pose.html", "d4/d52/structez_1_1united__pose" ],
+    [ "ez::odom", "d4/d42/structez_1_1odom.html", "d4/d42/structez_1_1odom" ],
+    [ "ez::united_odom", "d0/d50/structez_1_1united__odom.html", "d0/d50/structez_1_1united__odom" ],
+    [ "ez::odom", "dd/dc9/namespaceez.html#af7f4703c4992cc99c7802d846db2cbf9", null ],
+    [ "ez::pose", "dd/dc9/namespaceez.html#a25dcd7cc432a3473d29b7fb2c52f0317", null ],
+    [ "ez::united_odom", "dd/dc9/namespaceez.html#af70c07370ac75a845604cff854c6d1ee", null ],
+    [ "ez::united_pose", "dd/dc9/namespaceez.html#a69200b8c2d862ed18b73178dceddbb13", null ],
+    [ "ez::drive_directions", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fb", [
+      [ "ez::FWD", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fba8f6e5f4adaa8263daa41dccdb2c72004", null ],
+      [ "ez::FORWARD", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fbaab4875428a11a9d32313dd14eb4be7fe", null ],
+      [ "ez::fwd", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fbaaa1fc7e8f50492cd92daf9ff84986bef", null ],
+      [ "ez::forward", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fba6c6f2d21b4e860b107f0e07351cb473e", null ],
+      [ "ez::REV", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fbab2be303fcec63bcd3cc2ee9369a63a7b", null ],
+      [ "ez::REVERSE", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fbab6e8775edfd80b13ab0ff36d42c39b05", null ],
+      [ "ez::rev", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fbaeb8a72d9a7de91f978fc8c01ea9c9fed", null ],
+      [ "ez::reverse", "dd/dc9/namespaceez.html#aa18758cd17f307d4aef96ed4ad25b9fba3df8dbd5495469f843bf3ab2076fa865", null ]
+    ] ],
+    [ "ez::e_angle_behavior", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94b", [
+      [ "ez::raw", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94ba9f8d134d36ee652fa6690e1bf543227f", null ],
+      [ "ez::left_turn", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94baab89135fecf43babbc3e78fb993048f1", null ],
+      [ "ez::LEFT_TURN", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94bac24451cb08ebefc553d7b845474043ca", null ],
+      [ "ez::counterclockwise", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94ba6a610b5b0d152e06e922e93a9e183b76", null ],
+      [ "ez::ccw", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94ba71ebb202d8abc2014c06927b7c79d5a5", null ],
+      [ "ez::right_turn", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94ba51877758d1c1886474a8556b893ae4e9", null ],
+      [ "ez::RIGHT_TURN", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94bafa1820f98f5d02a0b473c29f9c71f173", null ],
+      [ "ez::clockwise", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94baed62c26e7b7185debecd95cb7f16735b", null ],
+      [ "ez::cw", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94bab71ec0e674c998a00d659a16ad678443", null ],
+      [ "ez::shortest", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94ba235262f705843645510addd474771963", null ],
+      [ "ez::longest", "dd/dc9/namespaceez.html#a1d657803a16de35307f05a1ee7bbb94ba5fb12eebefc0f3213983bdde136ebe95", null ]
+    ] ],
+    [ "ez::e_mode", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58", [
+      [ "ez::DISABLE", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58ad48b6ce8ae9008ed0f5c05613a887f5c", null ],
+      [ "ez::SWING", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58a8dfb9b79e9cf49087a56da870348bb98", null ],
+      [ "ez::TURN", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58ad301ecd0106921474146e386b553ce8c", null ],
+      [ "ez::TURN_TO_POINT", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58ad089df28e0cc14a0ed461f9133be7b58", null ],
+      [ "ez::DRIVE", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58a0014182bf2a65900cce215f375966b1a", null ],
+      [ "ez::POINT_TO_POINT", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58a835da10022a5171bbd300fbe47f616c2", null ],
+      [ "ez::PURE_PURSUIT", "dd/dc9/namespaceez.html#a10ec485cc6219dd3279b3fb634bc7b58adfc8e24bc7a61c9b3cdb20bdced58d68", null ]
+    ] ],
+    [ "ez::e_swing", "dd/dc9/namespaceez.html#aa158d67677b1402269ae74fccf126826", [
+      [ "ez::LEFT_SWING", "dd/dc9/namespaceez.html#aa158d67677b1402269ae74fccf126826aea9e3b1a338800403c0a0dccce52ed10", null ],
+      [ "ez::RIGHT_SWING", "dd/dc9/namespaceez.html#aa158d67677b1402269ae74fccf126826a8b5b70e0f7188dc793666735cb8ebb9e", null ]
+    ] ],
+    [ "ez::e_type", "dd/dc9/namespaceez.html#a64c86f1d8bdeb77623fa05394171e58d", [
+      [ "ez::SINGLE", "dd/dc9/namespaceez.html#a64c86f1d8bdeb77623fa05394171e58daed68ec30193eacac1ca5d1130bffb7fe", null ],
+      [ "ez::SPLIT", "dd/dc9/namespaceez.html#a64c86f1d8bdeb77623fa05394171e58dab3050cec4250838318dbdd0eccd89944", null ]
+    ] ],
+    [ "ez::exit_output", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024", [
+      [ "ez::RUNNING", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024a68035c1de5c5e022e474776510a32fd1", null ],
+      [ "ez::SMALL_EXIT", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024a109f25e162ebe21b303ad29581b5d323", null ],
+      [ "ez::BIG_EXIT", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024a89691a3348b67fb3a48aacd281cbf11b", null ],
+      [ "ez::VELOCITY_EXIT", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024a2ce952f5df03edd2775157f7b5c0f279", null ],
+      [ "ez::mA_EXIT", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024a604d78eb492ea2b31d69a8968f8fb5e0", null ],
+      [ "ez::ERROR_NO_CONSTANTS", "dd/dc9/namespaceez.html#a5d9f3b9aeeff0e7fe2805c9f1b538024a930766127a4cae906bfb8a63fc13b088", null ]
+    ] ],
+    [ "ez::util::absolute_angle_to_point", "dd/d9b/namespaceez_1_1util.html#a6451ac78cb29f1bb8a79d3263d366d9d", null ],
+    [ "ez::util::clamp", "dd/d9b/namespaceez_1_1util.html#a05e0922f1b454c97be35d976a8d46c26", null ],
+    [ "ez::util::clamp", "dd/d9b/namespaceez_1_1util.html#ab1374647fb311c563cf8b402dcd4ae86", null ],
+    [ "ez::util::distance_to_point", "dd/d9b/namespaceez_1_1util.html#ab7f26640a531ef880c4a5a649f25772d", null ],
+    [ "ez::exit_to_string", "dd/dc9/namespaceez.html#a620211db234ae2c265504f1e4683c6f1", null ],
+    [ "ez::ez_template_print", "dd/dc9/namespaceez.html#ab1295ead5e9420e3bb89816c3f43e81d", null ],
+    [ "ez::util::places_after_decimal", "dd/d9b/namespaceez_1_1util.html#a75240049a5629ea65336cb7455ad15ea", null ],
+    [ "ez::util::reversed_active", "dd/d9b/namespaceez_1_1util.html#ae21ba5a43e20e3926cc403320c48b49f", null ],
+    [ "ez::screen_print", "dd/dc9/namespaceez.html#a8561a63bce8d15f6238f7411ff79cde0", null ],
+    [ "ez::util::sgn", "dd/d9b/namespaceez_1_1util.html#a21a981672d1a0686af682f870d0a1158", null ],
+    [ "ez::util::to_deg", "dd/d9b/namespaceez_1_1util.html#a4c251c37e89010efdd3a7bc827f03996", null ],
+    [ "ez::util::to_rad", "dd/d9b/namespaceez_1_1util.html#a2b102cf150a58d13850d2306704a96bc", null ],
+    [ "ez::util::to_string_with_precision", "dd/d9b/namespaceez_1_1util.html#afaf1b37159599961cb53ac549aa363c1", null ],
+    [ "ez::util::turn_longest", "dd/d9b/namespaceez_1_1util.html#a24e4268dcf6db2a00325cf3e121aae6a", null ],
+    [ "ez::util::turn_shortest", "dd/d9b/namespaceez_1_1util.html#ac34949c009db715136337dd1ed6015c8", null ],
+    [ "ez::util::united_odom_to_odom", "dd/d9b/namespaceez_1_1util.html#a1ee53d59806ebd7c27bafdc64ebe5d56", null ],
+    [ "ez::util::united_odoms_to_odoms", "dd/d9b/namespaceez_1_1util.html#a04a65d86530e7f7ec6a5ea8879b5426b", null ],
+    [ "ez::util::united_pose_to_pose", "dd/d9b/namespaceez_1_1util.html#a3ead7c663581ab7b8d77cba38b6ec11b", null ],
+    [ "ez::util::vector_off_point", "dd/d9b/namespaceez_1_1util.html#a28676a2cdec1c62da22175fb62a6ca16", null ],
+    [ "ez::util::wrap_angle", "dd/d9b/namespaceez_1_1util.html#af3dd79ae03c7d62a4adea2bd3f260bf1", null ],
+    [ "ez::ANGLE_NOT_SET", "dd/dc9/namespaceez.html#a933a89a5676979a52869927adcce6344", null ],
+    [ "ez::util::AUTON_RAN", "dd/d9b/namespaceez_1_1util.html#a4b2c93f6d2aab100d364ea89c5463108", null ],
+    [ "ez::util::DELAY_TIME", "dd/d9b/namespaceez_1_1util.html#acfc39f5b0f37eb853f82e93181a21ea7", null ],
+    [ "master", "d0/d3f/util_8hpp.html#a083d34e0e3e3238bcd8cc0a6af2a9df1", null ],
+    [ "ez::p_ANGLE_NOT_SET", "dd/dc9/namespaceez.html#ac18bb28b1d459314be9b3ba4f10c5c94", null ],
+    [ "ez::util::SD_CARD_ACTIVE", "dd/d9b/namespaceez_1_1util.html#aa6a79a6db5188a53e7d025ceddaa99b9", null ]
+];

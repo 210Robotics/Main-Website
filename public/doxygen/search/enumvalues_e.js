@@ -1,0 +1,23 @@
+var searchData=
+[
+  ['object_0',['object',['../da/d76/group__cpp-aivision.html#gga70894a1246786e12d6b7af8427f6fd58aa8cfde6331bd59eb2ac96f8911c4b666',1,'pros::v5']]],
+  ['objects_1',['objects',['../da/d76/group__cpp-aivision.html#ggab36914b63d1a794bbcfd77f3e6c80b82a5891da2d64975cae48d175d1e001f5da',1,'pros::v5']]],
+  ['off_2',['off',['../de/d81/classokapi_1_1Logger.html#a66826a92c568743a2722d3c3f6887d81a3262d48df5d75e3452f0f16b313b7808',1,'okapi::Logger']]],
+  ['old_5flace_3',['old_lace',['../d1/d8a/group__cpp-colors.html#gga5533dcafd69b8cfd93f36f13414e2cffa5e84be20fb6dd068f5368e6d245460bd',1,'pros']]],
+  ['olive_4',['olive',['../d1/d8a/group__cpp-colors.html#gga5533dcafd69b8cfd93f36f13414e2cffaf431b0eea3c08186ed101e588bfb3a2f',1,'pros']]],
+  ['olive_5fdrab_5',['olive_drab',['../d1/d8a/group__cpp-colors.html#gga5533dcafd69b8cfd93f36f13414e2cffa2fe5734b0399752dfa2a0c93b6c75934',1,'pros']]],
+  ['openvg_5fblend_5fadditive_6',['OPENVG_BLEND_ADDITIVE',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a27496ac1332498458cf8169d9a0d514e',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fdarken_7',['OPENVG_BLEND_DARKEN',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1ac8821c9cd4915cfd6cf2738985530615',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fdst_5fin_8',['OPENVG_BLEND_DST_IN',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a38ed259c070e167347ccdc47bf506992',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fdst_5fover_9',['OPENVG_BLEND_DST_OVER',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1ae33595d86308760ebc0ce1073587d88e',1,'vg_lite.h']]],
+  ['openvg_5fblend_5flighten_10',['OPENVG_BLEND_LIGHTEN',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a3e92e4f31de9e6e399f2a941ed83b392',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fmultiply_11',['OPENVG_BLEND_MULTIPLY',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a20b978cd5696980a88b453759316ccbb',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fscreen_12',['OPENVG_BLEND_SCREEN',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a74882dc19a64252db5c81a3286b21240',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fsrc_13',['OPENVG_BLEND_SRC',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a439fbc8d3078cd4597c4d359aea2d12c',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fsrc_5fin_14',['OPENVG_BLEND_SRC_IN',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1ae887278e14446c1f156c91b5fd70a9a4',1,'vg_lite.h']]],
+  ['openvg_5fblend_5fsrc_5fover_15',['OPENVG_BLEND_SRC_OVER',['../d8/dff/vg__lite_8h.html#a2ab9214248f9a5bb6d615d9bbbfdcdb1a9450f1c759373fdef01af6553089813d',1,'vg_lite.h']]],
+  ['optical_16',['optical',['../d3/d60/group__cpp-device.html#gga0a7387ba6156c831ba1e61d75a04c3d9a4313277ed1d56c552d84008ff59b3d64',1,'pros::v5']]],
+  ['orange_17',['orange',['../d1/d8a/group__cpp-colors.html#gga5533dcafd69b8cfd93f36f13414e2cffafe01d67a002dfa0f3ac084298142eccd',1,'pros']]],
+  ['orange_5fred_18',['orange_red',['../d1/d8a/group__cpp-colors.html#gga5533dcafd69b8cfd93f36f13414e2cffae962684214d1c84dbc6a691b6d9eb60c',1,'pros']]],
+  ['orchid_19',['orchid',['../d1/d8a/group__cpp-colors.html#gga5533dcafd69b8cfd93f36f13414e2cffa93b1453c8ec5a548389c935052536ccb',1,'pros']]]
+];

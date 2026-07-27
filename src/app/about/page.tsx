@@ -4,15 +4,17 @@ import {
   NumberedList,
   SplitFeature,
 } from "@/components/content-blocks";
+import { getWebsitePageContent } from "@/lib/site-content";
 
-export default function About() {
+export default async function About() {
+  const content = await getWebsitePageContent("about");
   return (
     <>
       <PageHero
-        eyebrow="About 210"
-        title="Built to build people."
-        body="Founded for the 2026–27 season at UT San Antonio, 210 Robotics gives students a place to turn classroom knowledge into real machines, shared responsibility, and visible impact."
-        image="/media/gallery/vexu/vexu-1.jpg"
+        eyebrow={content.heroEyebrow}
+        title={content.heroTitle}
+        body={content.heroBody}
+        image={content.heroImage}
       />
       <Metrics
         items={[
@@ -23,24 +25,24 @@ export default function About() {
         ]}
       />
       <SplitFeature
-        eyebrow="Our mission"
-        title="Make engineering tangible."
-        body="We bring together students from every discipline to design, build, test, communicate, and lead. Competition creates urgency; ambitious projects create room to experiment; community keeps us moving forward with guidance from faculty advisor Don Petersen, Ph.D."
-        image="/media/brand/makerspace.png"
+        eyebrow={content.missionEyebrow}
+        title={content.missionTitle}
+        body={content.missionBody}
+        image={content.missionImage}
       >
         <NumberedList
           items={[
             {
-              title: "Learn by doing",
-              body: "Tools and theory stick when they are used to solve a real constraint.",
+              title: content.value1Title,
+              body: content.value1Body,
             },
             {
-              title: "Build across disciplines",
-              body: "Mechanical, electrical, software, business, and media work as one system.",
+              title: content.value2Title,
+              body: content.value2Body,
             },
             {
-              title: "Leave the team stronger",
-              body: "Every member documents, teaches, and creates an easier path for the next builder.",
+              title: content.value3Title,
+              body: content.value3Body,
             },
           ]}
         />
@@ -48,25 +50,25 @@ export default function About() {
       <section className="section border-y border-[#282828] bg-[#0d0d0d]">
         <div className="shell">
           <SectionHeading
-            eyebrow="How we build"
-            title="One organization, three connected programs."
+            eyebrow={content.programsEyebrow}
+            title={content.programsTitle}
           />
           <div className="grid gap-5 md:grid-cols-3">
             {[
               {
                 n: "01",
-                t: "VEX U",
-                b: "Competition engineering under hard constraints and a full-season development cycle.",
+                t: content.program1Title,
+                b: content.program1Body,
               },
               {
                 n: "02",
-                t: "SIDC",
-                b: "Immersive design, digital engineering, advanced manufacturing, and industry collaboration.",
+                t: content.program2Title,
+                b: content.program2Body,
               },
               {
                 n: "03",
-                t: "RoboRowdy",
-                b: "The global-winning autonomous system connecting physical robotics, software, and sustainable manufacturing.",
+                t: content.program3Title,
+                b: content.program3Body,
               },
             ].map((x) => (
               <div className="card interactive-card p-7" key={x.t}>

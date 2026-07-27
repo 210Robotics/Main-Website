@@ -1,87 +1,111 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import Image from "next/image";
 import { DriveSyncForm } from "@/components/drive-sync-form";
-import { desc, eq, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/db";
 import {
+  contributions,
+  docCategories,
+  docPages,
+  galleryEvents,
+  activityAttendance,
+  attendanceTokens,
+  calendarSnapshots,
   inquiries,
   hourEntries,
+  internalDocumentRevisions,
+  internalDocuments,
   mediaAssets,
   memberProjects,
   members,
   posts,
   projects,
+  publicProfileCards,
+  publicFormResponses,
+  publicForms,
+  availabilityPolls,
+  availabilityPollResponses,
   publicSettings,
+  sponsors,
+  teamActivities,
 } from "@/db/schema";
 import {
   approveMember,
   assertAdmin,
   createPost,
   deleteInquiry,
-  deleteMember,
   deletePost,
   suspendMember,
   updatePost,
   updatePublicMemberCount,
   updateInquiry,
-  updateMemberAccess,
-  updateTeamHour,
-  voidTeamHour,
 } from "@/app/admin/actions";
 import { BlogEditor } from "@/components/blog-editor";
 import { hasClerk } from "@/lib/auth";
 import {
+  accessRoleLabels,
+  assignableAccessRoles,
   hasPermission,
-  permissionKeys,
-  permissionLabels,
+  type PermissionKey,
 } from "@/lib/permissions";
+import { AccountEditor } from "@/components/account-editor";
+import { RosterManager } from "@/components/roster-manager";
+import { ImageUpload } from "@/components/image-upload";
+import { ActionForm } from "@/components/action-form";
+import { ActivityLog } from "@/components/activity-log";
+import type { ActivityLogRecord } from "@/lib/activity-log";
+import { DeleteAccountButton } from "@/components/delete-account-button";
+import { RestoreAccountButton } from "@/components/restore-account-button";
+import { SponsorManager } from "@/components/sponsor-manager";
+import { ActivityManager } from "@/components/activity-manager";
+import {
+  attendanceIsOpen,
+  attendanceUrl,
+  buildAttendanceToken,
+} from "@/lib/attendance";
+import { DocsManager } from "@/components/docs-manager";
+import { GalleryManager } from "@/components/gallery-manager";
+import { isGalleryMediaSource } from "@/lib/media-policy";
+import { CalendarRefreshForm } from "@/components/calendar-refresh-form";
+import { FormManager } from "@/components/form-manager";
+import { PollManager } from "@/components/poll-manager";
+import { DashboardNavigation } from "@/components/dashboard-navigation";
+import { WebsiteContentEditor } from "@/components/website-content-editor";
+import { InternalDocumentsManager } from "@/components/internal-documents-manager";
+import { AssistantWorkspace } from "@/components/team-os-workspace";
+import { DiscordAdminPanel } from "@/components/discord-admin-panel";
+import { MembershipDuesPanel } from "@/components/membership-dues-panel";
+import { adminLoadPlan, normalizeAdminTab } from "@/lib/workspace-loading";
 
 export const metadata: Metadata = {
   title: "Administration",
   robots: { index: false, follow: false },
 };
 
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    tab?: string;
+    page?: string;
+    period?: string;
+    discordQuery?: string;
+    recordingTitle?: string;
+    voiceChannelId?: string;
+  }>;
+}) {
+  const {
+    tab: requestedTab,
+    page: websitePage = "home",
+    period: duesPeriod,
+    discordQuery,
+    recordingTitle,
+    voiceChannelId,
+  } = await searchParams;
+  const tab = normalizeAdminTab(requestedTab);
+  const load = adminLoadPlan(tab);
   if (!hasClerk() || !hasDatabase()) return <SetupNotice />;
   const actor = await assertAdmin();
-  const [
-    memberRows,
-    inquiryRows,
-    postRows,
-    mediaRows,
-    projectRows,
-    assignmentRows,
-    hourRows,
-    settingsRows,
-  ] = await Promise.all([
-    getDb().select().from(members).orderBy(desc(members.createdAt)),
-    getDb()
-      .select()
-      .from(inquiries)
-      .orderBy(desc(inquiries.createdAt))
-      .limit(100),
-    getDb().select().from(posts).orderBy(desc(posts.updatedAt)),
-    getDb()
-      .select()
-      .from(mediaAssets)
-      .orderBy(desc(mediaAssets.createdAt))
-      .limit(50),
-    getDb().select().from(projects),
-    getDb().select().from(memberProjects),
-    getDb()
-      .select({
-        hour: hourEntries,
-        memberName: members.displayName,
-        memberRole: members.organizationRole,
-      })
-      .from(hourEntries)
-      .innerJoin(members, eq(hourEntries.memberId, members.id))
-      .where(isNull(hourEntries.deletedAt))
-      .orderBy(desc(hourEntries.workDate))
-      .limit(100),
-    getDb().select().from(publicSettings).limit(1),
-  ]);
   const canMembers = hasPermission(
     actor.accessRole,
     "members.approve",
@@ -90,6 +114,31 @@ export default async function AdminPage() {
   const canContent = hasPermission(
     actor.accessRole,
     "content.manage",
+    actor.permissionOverrides,
+  );
+  const canForms = hasPermission(
+    actor.accessRole,
+    "forms.manage",
+    actor.permissionOverrides,
+  );
+  const canDocuments = hasPermission(
+    actor.accessRole,
+    "documents.manage",
+    actor.permissionOverrides,
+  );
+  const canEditMembers = hasPermission(
+    actor.accessRole,
+    "members.edit",
+    actor.permissionOverrides,
+  );
+  const canDirectory = hasPermission(
+    actor.accessRole,
+    "directory.manage",
+    actor.permissionOverrides,
+  );
+  const canViewHours = hasPermission(
+    actor.accessRole,
+    "activity.view_all",
     actor.permissionOverrides,
   );
   const canInquiries = hasPermission(
@@ -102,9 +151,34 @@ export default async function AdminPage() {
     "media.manage",
     actor.permissionOverrides,
   );
+  const canSponsors = hasPermission(
+    actor.accessRole,
+    "sponsors.manage",
+    actor.permissionOverrides,
+  );
+  const canEvents = hasPermission(
+    actor.accessRole,
+    "events.manage",
+    actor.permissionOverrides,
+  );
+  const canExport = hasPermission(
+    actor.accessRole,
+    "reports.export",
+    actor.permissionOverrides,
+  );
   const canAccess = hasPermission(
     actor.accessRole,
     "access.manage",
+    actor.permissionOverrides,
+  );
+  const canDiscord = hasPermission(
+    actor.accessRole,
+    "integrations.manage",
+    actor.permissionOverrides,
+  );
+  const canDues = hasPermission(
+    actor.accessRole,
+    "dues.manage",
     actor.permissionOverrides,
   );
   const canEditHours = hasPermission(
@@ -112,11 +186,350 @@ export default async function AdminPage() {
     "activity.edit_all",
     actor.permissionOverrides,
   );
+  const canOperations = [
+    "tasks.manage",
+    "meetings.manage",
+    "finance.manage",
+    "engineering.manage",
+    "glossary.manage",
+    "integrations.manage",
+    "dues.manage",
+  ].some((permission) =>
+    hasPermission(
+      actor.accessRole,
+      permission as PermissionKey,
+      actor.permissionOverrides,
+    ),
+  );
+  const canReadMembers =
+    canMembers || canEditMembers || canAccess || canViewHours || canEvents;
+  const [
+    memberRows,
+    inquiryRows,
+    postRows,
+    mediaRows,
+    galleryAssetRows,
+    galleryEventRows,
+    galleryCountRows,
+    projectRows,
+    assignmentRows,
+    hourRows,
+    contributionRows,
+    settingsRows,
+    rosterRows,
+    sponsorRows,
+    activityRows,
+    attendanceRows,
+    attendanceTokenRows,
+    docCategoryRows,
+    docPageRows,
+    calendarSnapshotRows,
+    formRows,
+    formResponseRows,
+    pollRows,
+    pollResponseRows,
+    internalDocumentRows,
+    internalDocumentRevisionRows,
+  ] = await Promise.all([
+    load.members && (canReadMembers || canEvents)
+      ? getDb().select().from(members).orderBy(desc(members.createdAt))
+      : Promise.resolve([]),
+    load.inquiries && canInquiries
+      ? getDb()
+          .select()
+          .from(inquiries)
+          .orderBy(desc(inquiries.createdAt))
+          .limit(100)
+      : Promise.resolve([]),
+    load.posts && canContent
+      ? getDb().select().from(posts).orderBy(desc(posts.updatedAt))
+      : Promise.resolve([]),
+    load.media && (canMedia || canContent || canDirectory || canEditMembers || canSponsors)
+      ? getDb()
+          .select()
+          .from(mediaAssets)
+          .orderBy(desc(mediaAssets.createdAt))
+          .limit(200)
+      : Promise.resolve([]),
+    load.galleryAssets && canMedia
+      ? getDb()
+          .select()
+          .from(mediaAssets)
+          .where(
+            and(
+              eq(mediaAssets.source, "drive"),
+              isNull(mediaAssets.archivedAt),
+            ),
+          )
+          .orderBy(desc(mediaAssets.createdAt))
+          .limit(2000)
+      : Promise.resolve([]),
+    load.galleries && (canMedia || canContent)
+      ? getDb()
+          .select()
+          .from(galleryEvents)
+          .where(isNull(galleryEvents.archivedAt))
+          .orderBy(asc(galleryEvents.sortOrder), desc(galleryEvents.eventDate))
+      : Promise.resolve([]),
+    tab === "overview" && canMedia
+      ? getDb()
+          .select({ value: count() })
+          .from(mediaAssets)
+          .where(
+            and(
+              eq(mediaAssets.source, "drive"),
+              eq(mediaAssets.published, true),
+              isNull(mediaAssets.archivedAt),
+            ),
+          )
+      : Promise.resolve([]),
+    load.projects && (canMembers || canEditMembers)
+      ? getDb().select().from(projects)
+      : Promise.resolve([]),
+    load.assignments && canEditMembers
+      ? getDb().select().from(memberProjects)
+      : Promise.resolve([]),
+    load.activity && canViewHours
+      ? getDb()
+          .select({
+            hour: hourEntries,
+            memberName: members.displayName,
+            memberRole: members.organizationRole,
+          })
+          .from(hourEntries)
+          .innerJoin(members, eq(hourEntries.memberId, members.id))
+          .where(isNull(hourEntries.deletedAt))
+          .orderBy(desc(hourEntries.workDate))
+          .limit(250)
+      : Promise.resolve([]),
+    load.activity && canViewHours
+      ? getDb()
+          .select({
+            contribution: contributions,
+            memberName: members.displayName,
+            memberRole: members.organizationRole,
+          })
+          .from(contributions)
+          .innerJoin(members, eq(contributions.memberId, members.id))
+          .where(isNull(contributions.deletedAt))
+          .orderBy(desc(contributions.contributionDate))
+          .limit(250)
+      : Promise.resolve([]),
+    load.settings && (actor.accessRole === "SUPER_ADMIN" || canContent)
+      ? getDb().select().from(publicSettings).limit(1)
+      : Promise.resolve([]),
+    load.roster && canDirectory
+      ? getDb()
+          .select({ card: publicProfileCards, blobUrl: mediaAssets.blobUrl })
+          .from(publicProfileCards)
+          .leftJoin(
+            mediaAssets,
+            eq(mediaAssets.id, publicProfileCards.photoMediaId),
+          )
+          .orderBy(
+            publicProfileCards.page,
+            publicProfileCards.section,
+            publicProfileCards.sortOrder,
+          )
+      : Promise.resolve([]),
+    load.sponsors && canSponsors
+      ? getDb()
+          .select({ sponsor: sponsors, blobUrl: mediaAssets.blobUrl })
+          .from(sponsors)
+          .leftJoin(mediaAssets, eq(mediaAssets.id, sponsors.logoMediaId))
+          .orderBy(asc(sponsors.sortOrder), asc(sponsors.name))
+      : Promise.resolve([]),
+    load.events && (canEvents || canViewHours)
+      ? getDb()
+          .select()
+          .from(teamActivities)
+          .orderBy(desc(teamActivities.startsAt))
+      : Promise.resolve([]),
+    load.attendance && (canEvents || canViewHours)
+      ? getDb()
+          .select({
+            attendance: activityAttendance,
+            memberName: members.displayName,
+            memberRole: members.organizationRole,
+          })
+          .from(activityAttendance)
+          .innerJoin(members, eq(members.id, activityAttendance.memberId))
+          .orderBy(desc(activityAttendance.checkedInAt))
+      : Promise.resolve([]),
+    load.attendanceTokens && canEvents
+      ? getDb()
+          .select()
+          .from(attendanceTokens)
+          .where(isNull(attendanceTokens.revokedAt))
+          .orderBy(desc(attendanceTokens.createdAt))
+      : Promise.resolve([]),
+    load.docs && canContent
+      ? getDb()
+          .select()
+          .from(docCategories)
+          .where(isNull(docCategories.archivedAt))
+          .orderBy(asc(docCategories.sortOrder), asc(docCategories.title))
+      : Promise.resolve([]),
+    load.docs && canContent
+      ? getDb()
+          .select()
+          .from(docPages)
+          .orderBy(asc(docPages.sortOrder), asc(docPages.title))
+      : Promise.resolve([]),
+    load.calendar && canEvents
+      ? getDb()
+          .select()
+          .from(calendarSnapshots)
+          .where(eq(calendarSnapshots.id, "shared"))
+          .limit(1)
+      : Promise.resolve([]),
+    load.forms && canForms
+      ? getDb().select().from(publicForms).orderBy(desc(publicForms.updatedAt))
+      : Promise.resolve([]),
+    load.formResponses && canForms
+      ? getDb()
+          .select({
+            response: publicFormResponses,
+            memberName: members.displayName,
+          })
+          .from(publicFormResponses)
+          .leftJoin(
+            members,
+            eq(members.id, publicFormResponses.submittedByMemberId),
+          )
+          .orderBy(desc(publicFormResponses.submittedAt))
+      : Promise.resolve([]),
+    load.polls && canForms
+      ? getDb()
+          .select()
+          .from(availabilityPolls)
+          .orderBy(desc(availabilityPolls.updatedAt))
+      : Promise.resolve([]),
+    load.pollResponses && canForms
+      ? getDb()
+          .select({
+            response: availabilityPollResponses,
+            memberName: members.displayName,
+          })
+          .from(availabilityPollResponses)
+          .leftJoin(
+            members,
+            eq(members.id, availabilityPollResponses.submittedByMemberId),
+          )
+          .orderBy(desc(availabilityPollResponses.updatedAt))
+      : Promise.resolve([]),
+    load.documents && canDocuments
+      ? getDb()
+          .select({
+            document: internalDocuments,
+            updatedBy: members.displayName,
+          })
+          .from(internalDocuments)
+          .leftJoin(
+            members,
+            eq(members.id, internalDocuments.updatedByMemberId),
+          )
+          .where(isNull(internalDocuments.archivedAt))
+          .orderBy(desc(internalDocuments.updatedAt))
+      : Promise.resolve([]),
+    load.documents && canDocuments
+      ? getDb()
+          .select({
+            revision: internalDocumentRevisions,
+            editorName: members.displayName,
+          })
+          .from(internalDocumentRevisions)
+          .leftJoin(
+            members,
+            eq(members.id, internalDocumentRevisions.editorMemberId),
+          )
+          .orderBy(
+            desc(internalDocumentRevisions.createdAt),
+            desc(internalDocumentRevisions.versionNumber),
+          )
+      : Promise.resolve([]),
+  ]);
   const siteSettings = settingsRows[0];
   const pending = memberRows.filter((member) => member.status === "PENDING");
+  const activityManagerRows = activityRows.map((activity) => {
+    const token = attendanceTokenRows.find(
+      (candidate) => candidate.activityId === activity.id,
+    );
+    const tokenOpen =
+      token &&
+      attendanceIsOpen({
+        openedAt: activity.attendanceOpenedAt,
+        closesAt: activity.attendanceClosesAt,
+        tokenExpiresAt: token.expiresAt,
+        tokenRevokedAt: token.revokedAt,
+      });
+    return {
+      ...activity,
+      startsAt: activity.startsAt.toISOString(),
+      endsAt: activity.endsAt.toISOString(),
+      archivedAt: activity.archivedAt?.toISOString() ?? null,
+      attendanceOpenedAt: activity.attendanceOpenedAt?.toISOString() ?? null,
+      attendanceClosesAt: activity.attendanceClosesAt?.toISOString() ?? null,
+      checkInUrl:
+        tokenOpen && token
+          ? attendanceUrl(buildAttendanceToken(token.id).token)
+          : null,
+      attendees: attendanceRows
+        .filter((row) => row.attendance.activityId === activity.id)
+        .map((row) => ({
+          id: row.attendance.id,
+          memberId: row.attendance.memberId,
+          name: row.memberName,
+          role: row.memberRole,
+          checkedInAt: row.attendance.checkedInAt.toISOString(),
+          method: row.attendance.method,
+          status: row.attendance.status,
+        })),
+    };
+  });
+  const activityRecords: ActivityLogRecord[] = [
+    ...hourRows.map(({ hour, memberName, memberRole }) => ({
+      id: hour.id,
+      type: "hour" as const,
+      memberId: hour.memberId,
+      memberName,
+      memberRole,
+      date: hour.workDate.toISOString().slice(0, 10),
+      project: hour.project,
+      category: hour.category,
+      description: hour.description,
+      createdAt: hour.createdAt.toISOString(),
+      minutes: hour.minutes,
+    })),
+    ...contributionRows.map(({ contribution, memberName, memberRole }) => ({
+      id: contribution.id,
+      type: "contribution" as const,
+      memberId: contribution.memberId,
+      memberName,
+      memberRole,
+      date: contribution.contributionDate.toISOString().slice(0, 10),
+      project: contribution.project,
+      category: contribution.category,
+      description: contribution.description,
+      createdAt: contribution.createdAt.toISOString(),
+      title: contribution.title,
+      evidenceUrl: contribution.evidenceUrl,
+    })),
+  ].sort(
+    (a, b) =>
+      b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt),
+  );
+  const galleryRows = (canMedia ? galleryAssetRows : mediaRows).filter(
+    (asset) =>
+      isGalleryMediaSource(asset.source) &&
+      asset.published &&
+      !asset.archivedAt,
+  );
   return (
     <section className="min-h-screen bg-[#090909] grid-bg">
-      <div className="shell py-10">
+      <div
+        className={`shell admin-workspace py-8 sm:py-10 ${tab === "website" ? "admin-website-shell" : ""}`}
+      >
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="eyebrow">Administration</p>
@@ -132,26 +545,494 @@ export default async function AdminPage() {
             Member portal
           </Link>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric
-            value={String(
-              memberRows.filter((m) => m.status === "ACTIVE").length,
-            )}
-            label="Active members"
+        {tab === "overview" && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          {canReadMembers && (
+            <Metric
+              value={String(
+                memberRows.filter((m) => m.status === "ACTIVE").length,
+              )}
+              label="Active members"
+            />
+          )}
+          {canMembers && (
+            <Metric value={String(pending.length)} label="Pending approval" />
+          )}
+          {canInquiries && (
+            <Metric
+              value={String(
+                inquiryRows.filter((i) => i.status === "NEW").length,
+              )}
+              label="New inquiries"
+            />
+          )}
+          {canContent && (
+            <Metric
+              value={String(
+                postRows.filter((p) => p.status === "PUBLISHED").length,
+              )}
+              label="Published stories"
+            />
+          )}
+          {canForms && (
+            <Metric
+              value={String(
+                formRows.filter((form) => form.status === "OPEN").length,
+              )}
+              label="Open forms"
+            />
+          )}
+        </div>}
+        <DashboardNavigation
+          current={tab}
+          label="Admin dashboard sections"
+          items={[
+            { value: "overview", label: "Overview", href: "/admin" },
+            ...(canEvents
+              ? [
+                  {
+                    value: "events",
+                    label: "Events & attendance",
+                    href: "/admin?tab=events",
+                  },
+                ]
+              : []),
+            ...(canOperations
+              ? [
+                  {
+                    value: "operations",
+                    label: "Operations",
+                    href: "/admin/operations",
+                  },
+                  {
+                    value: "control",
+                    label: "Control center",
+                    href: "/admin/control-center",
+                  },
+                  {
+                    value: "assistant",
+                    label: "AI assistant",
+                    href: "/admin?tab=assistant",
+                  },
+                ]
+              : []),
+            ...(canViewHours
+              ? [
+                  {
+                    value: "activity",
+                    label: "Activity records",
+                    href: "/admin?tab=activity",
+                  },
+                ]
+              : []),
+            ...(canReadMembers || canDirectory
+              ? [
+                  {
+                    value: "members",
+                    label: "Members & roster",
+                    href: "/admin?tab=members",
+                  },
+                ]
+              : []),
+            ...(canDiscord
+              ? [
+                  {
+                    value: "discord",
+                    label: "Discord",
+                    href: "/admin?tab=discord",
+                  },
+                ]
+              : []),
+            ...(canDues
+              ? [
+                  {
+                    value: "dues",
+                    label: "Membership dues",
+                    href: "/admin?tab=dues",
+                  },
+                ]
+              : []),
+            ...(canForms
+              ? [
+                  { value: "forms", label: "Forms", href: "/admin?tab=forms" },
+                  {
+                    value: "polls",
+                    label: "Scheduling polls",
+                    href: "/admin?tab=polls",
+                  },
+                ]
+              : []),
+            ...(canContent
+              ? [
+                  {
+                    value: "website",
+                    label: "Website pages",
+                    href: "/admin?tab=website",
+                  },
+                  {
+                    value: "content",
+                    label: "News",
+                    href: "/admin?tab=content",
+                  },
+                  {
+                    value: "docs",
+                    label: "Documentation",
+                    href: "/admin?tab=docs",
+                  },
+                ]
+              : []),
+            ...(canDocuments
+              ? [
+                  {
+                    value: "documents",
+                    label: "Internal documents",
+                    href: "/admin?tab=documents",
+                  },
+                ]
+              : []),
+            ...(canSponsors
+              ? [
+                  {
+                    value: "sponsors",
+                    label: "Sponsors",
+                    href: "/admin?tab=sponsors",
+                  },
+                ]
+              : []),
+            ...(canMedia
+              ? [
+                  {
+                    value: "media",
+                    label: "Media gallery",
+                    href: "/admin?tab=media",
+                  },
+                ]
+              : []),
+            ...(canInquiries
+              ? [
+                  {
+                    value: "inquiries",
+                    label: "Inbox",
+                    href: "/admin?tab=inquiries",
+                  },
+                ]
+              : []),
+          ]}
+        />
+        {canDiscord && tab === "discord" && (
+          <DiscordAdminPanel
+            searchQuery={discordQuery}
+            recordingTitle={recordingTitle}
+            voiceChannelId={voiceChannelId}
           />
-          <Metric value={String(pending.length)} label="Pending approval" />
-          <Metric
-            value={String(inquiryRows.filter((i) => i.status === "NEW").length)}
-            label="New inquiries"
-          />
-          <Metric
-            value={String(
-              postRows.filter((p) => p.status === "PUBLISHED").length,
-            )}
-            label="Published stories"
-          />
-        </div>
-        {actor.accessRole === "SUPER_ADMIN" && (
+        )}
+        {canDues && tab === "dues" && (
+          <MembershipDuesPanel period={duesPeriod} />
+        )}
+        {canContent && tab === "website" && (
+          <Panel
+            id="website-content-editor"
+            title="Website pages"
+            eyebrow="Live text and photography without a redeploy"
+          >
+            <WebsiteContentEditor
+              pageId={websitePage}
+              overrides={siteSettings?.pageContent ?? {}}
+              customPages={siteSettings?.customPages ?? []}
+              uploaderId={actor.id}
+            />
+          </Panel>
+        )}
+        {tab === "overview" && (
+          <Panel
+            id="admin-overview"
+            title="Overview"
+            eyebrow="What needs attention across 210 Robotics"
+          >
+            <p className="max-w-3xl text-sm leading-7 text-[#999]">
+              Review current work, jump into the areas you manage, and keep the
+              public website, team records, and documentation moving forward.
+            </p>
+            <div className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {canMembers && (
+                <OverviewCard
+                  value={String(pending.length)}
+                  title="Pending member approvals"
+                  detail={
+                    pending.length
+                      ? "Accounts are waiting for review."
+                      : "No accounts are waiting."
+                  }
+                  href="/admin?tab=members"
+                />
+              )}
+              {canInquiries && (
+                <OverviewCard
+                  value={String(
+                    inquiryRows.filter((inquiry) => inquiry.status === "NEW")
+                      .length,
+                  )}
+                  title="New inbox messages"
+                  detail="Review requests from prospective members and partners."
+                  href="/admin?tab=inquiries"
+                />
+              )}
+              {canContent && (
+                <OverviewCard
+                  value={String(
+                    docPageRows.filter((page) => page.status === "DRAFT")
+                      .length,
+                  )}
+                  title="Documentation drafts"
+                  detail={`${docPageRows.filter((page) => page.status === "PUBLISHED").length} pages are currently published.`}
+                  href="/admin?tab=docs"
+                />
+              )}
+              {canEvents && (
+                <OverviewCard
+                  value={String(
+                    activityRows.filter(
+                      (activity) =>
+                        activity.status === "SCHEDULED" &&
+                        !activity.archivedAt &&
+                        activity.startsAt >= new Date(),
+                    ).length,
+                  )}
+                  title="Upcoming activities"
+                  detail="Manage meetings, workshops, outreach, and attendance."
+                  href="/admin?tab=events"
+                />
+              )}
+              {canForms && (
+                <OverviewCard
+                  value={String(formResponseRows.length)}
+                  title="Form responses"
+                  detail={`${formRows.filter((form) => form.status === "OPEN").length} forms are open now.`}
+                  href="/admin?tab=forms"
+                />
+              )}
+              {canMedia && (
+                <OverviewCard
+                  value={String(galleryCountRows[0]?.value ?? 0)}
+                  title="Published gallery assets"
+                  detail="Review and organize the public media gallery."
+                  href="/admin?tab=media"
+                />
+              )}
+              {canOperations && (
+                <OverviewCard
+                  value="LIVE"
+                  title="Leadership control center"
+                  detail="Risks, project health, recognition, decisions, shop queue, automations, templates, and sponsors."
+                  href="/admin/control-center"
+                />
+              )}
+            </div>
+            <div className="mt-8 border-t border-[#333] pt-6">
+              <h3 className="text-lg font-bold">Quick links</h3>
+              <div className="mt-4 flex flex-wrap gap-3">
+                {canContent && (
+                  <Link className="button" href="/admin?tab=docs">
+                    Edit documentation
+                  </Link>
+                )}
+                {canContent && (
+                  <Link className="button secondary" href="/admin?tab=content">
+                    Manage news
+                  </Link>
+                )}
+                {canEvents && (
+                  <Link className="button secondary" href="/admin?tab=events">
+                    Manage events
+                  </Link>
+                )}
+                {canOperations && (
+                  <Link className="button" href="/admin/control-center">
+                    Open control center
+                  </Link>
+                )}
+                <Link className="button secondary" href="/docs">
+                  View public docs
+                </Link>
+                <Link className="button secondary" href="/doxygen/index.html">
+                  Open Doxygen
+                </Link>
+              </div>
+            </div>
+          </Panel>
+        )}
+        {canOperations && tab === "assistant" && <AssistantWorkspace uploaderId={actor.id} />}
+        {canEvents && tab === "events" && (
+          <Panel
+            id="events-attendance"
+            title="Events & attendance"
+            eyebrow="Meetings, workshops, outreach, and training"
+          >
+            <CalendarRefreshForm
+              lastSyncedAt={
+                calendarSnapshotRows[0]?.syncedAt.toISOString() ?? null
+              }
+            />
+            <ActivityManager
+              activities={activityManagerRows}
+              members={memberRows
+                .filter((member) => member.status === "ACTIVE")
+                .map((member) => ({
+                  id: member.id,
+                  name: member.displayName,
+                  role: member.organizationRole,
+                }))}
+              canExport={canExport}
+            />
+          </Panel>
+        )}
+        {canContent && tab === "docs" && (
+          <Panel
+            id="documentation-editor"
+            title="Team documentation"
+            eyebrow="Engineering notebook, code, and team wiki"
+          >
+            <DocsManager
+              key={`${docCategoryRows.map((category) => `${category.id}:${category.sortOrder}`).join("|")}-${docPageRows.map((page) => `${page.id}:${page.categoryId}:${page.sortOrder}`).join("|")}`}
+              uploaderId={actor.id}
+              categories={docCategoryRows.map((category) => ({
+                id: category.id,
+                parentId: category.parentId,
+                slug: category.slug,
+                title: category.title,
+                sortOrder: category.sortOrder,
+              }))}
+              pages={docPageRows.map((page) => ({
+                id: page.id,
+                categoryId: page.categoryId,
+                title: page.title,
+                path: page.path,
+                summary: page.summary,
+                bodyHtml: page.bodyHtml,
+                bodyJson: page.bodyJson,
+                visibility: page.visibility,
+                status: page.status,
+                sortOrder: page.sortOrder,
+                updatedAt: page.updatedAt.toISOString(),
+              }))}
+            />
+          </Panel>
+        )}
+        {canDocuments && tab === "documents" && (
+          <Panel
+            id="internal-document-archive"
+            title="Documents"
+            eyebrow="Private DOCX and PDF archive"
+          >
+            <InternalDocumentsManager
+              uploaderId={actor.id}
+              documents={internalDocumentRows.map(
+                ({ document, updatedBy }) => ({
+                  id: document.id,
+                  title: document.title,
+                  description: document.description,
+                  category: document.category,
+                  originalFilename: document.originalFilename,
+                  mimeType: document.mimeType,
+                  bytes: document.bytes,
+                  contentHtml: document.contentHtml,
+                  editable: document.editable,
+                  driveWebViewLink: document.driveWebViewLink,
+                  driveSyncStatus: document.driveSyncStatus,
+                  currentVersion: document.currentVersion,
+                  updatedAt: document.updatedAt.toISOString(),
+                  updatedBy: updatedBy || "Former member",
+                }),
+              )}
+              revisions={internalDocumentRevisionRows.map(
+                ({ revision, editorName }) => ({
+                  id: revision.id,
+                  documentId: revision.documentId,
+                  versionNumber: revision.versionNumber,
+                  reason: revision.reason,
+                  createdAt: revision.createdAt.toISOString(),
+                  editorName: editorName || "Former member",
+                }),
+              )}
+            />
+          </Panel>
+        )}
+        {canForms && tab === "forms" && (
+          <Panel
+            id="form-manager"
+            title="Forms"
+            eyebrow="Private links, QR sharing, responses, and analytics"
+          >
+            <p className="mb-6 max-w-3xl text-sm leading-7 text-[#999]">
+              Build branded forms that stay unlisted from the public website.
+              Anyone with the exact link or QR code can respond without creating
+              an account.
+            </p>
+            <FormManager
+              uploaderId={actor.id}
+              forms={formRows.map((form) => ({
+                id: form.id,
+                accessKey: form.accessKey,
+                title: form.title,
+                descriptionHtml: form.descriptionHtml,
+                confirmationMessage: form.confirmationMessage,
+                fields: form.fields,
+                status: form.status,
+                responseCount: form.responseCount,
+                updatedAt: form.updatedAt.toISOString(),
+              }))}
+              responses={formResponseRows.map(({ response, memberName }) => ({
+                id: response.id,
+                formId: response.formId,
+                answers: response.answers,
+                submittedAt: response.submittedAt.toISOString(),
+                updatedAt: response.updatedAt.toISOString(),
+                respondentName: response.respondentName,
+                respondentEmail: response.respondentEmail,
+                memberName,
+              }))}
+            />
+          </Panel>
+        )}
+        {canForms && tab === "polls" && (
+          <Panel
+            id="poll-manager"
+            title="Scheduling polls"
+            eyebrow="Private links, QR sharing, availability, and best overlap"
+          >
+            <p className="mb-6 max-w-3xl text-sm leading-7 text-[#999]">
+              Offer possible dates and time blocks, then send one private link.
+              Guests can respond without an account and the strongest overlaps
+              rise to the top automatically.
+            </p>
+            <PollManager
+              polls={pollRows.map((poll) => ({
+                id: poll.id,
+                accessKey: poll.accessKey,
+                title: poll.title,
+                description: poll.description,
+                timezone: poll.timezone,
+                dates: poll.dates,
+                startTime: poll.startTime,
+                endTime: poll.endTime,
+                slotMinutes: poll.slotMinutes,
+                status: poll.status,
+                responseCount: poll.responseCount,
+                updatedAt: poll.updatedAt.toISOString(),
+              }))}
+              responses={pollResponseRows.map(({ response, memberName }) => ({
+                id: response.id,
+                pollId: response.pollId,
+                name: response.name,
+                email: response.email,
+                availableSlots: response.availableSlots,
+                submittedAt: response.submittedAt.toISOString(),
+                updatedAt: response.updatedAt.toISOString(),
+                memberName,
+              }))}
+            />
+          </Panel>
+        )}
+        {actor.accessRole === "SUPER_ADMIN" && tab === "members" && (
           <Panel title="Public member count" eyebrow="Homepage statistic">
             <form
               action={updatePublicMemberCount}
@@ -186,7 +1067,7 @@ export default async function AdminPage() {
             </form>
           </Panel>
         )}
-        {canMembers && (
+        {canMembers && tab === "members" && (
           <Panel title="Pending accounts" eyebrow="Members">
             <div className="space-y-4">
               {pending.length ? (
@@ -224,13 +1105,17 @@ export default async function AdminPage() {
                           name="accessRole"
                           defaultValue="MEMBER"
                         >
-                          <option>MEMBER</option>
-                          <option>OFFICER</option>
-                          <option>CONTENT_ADMIN</option>
-                          <option>RECORDS_ADMIN</option>
-                          {actor.accessRole === "SUPER_ADMIN" && (
-                            <option>FULL_ADMIN</option>
-                          )}
+                          {assignableAccessRoles
+                            .filter(
+                              (role) =>
+                                actor.accessRole === "SUPER_ADMIN" ||
+                                role !== "FULL_ADMIN",
+                            )
+                            .map((role) => (
+                              <option key={role} value={role}>
+                                {accessRoleLabels[role]}
+                              </option>
+                            ))}
                         </select>
                       </Field>
                     </div>
@@ -244,270 +1129,188 @@ export default async function AdminPage() {
             </div>
           </Panel>
         )}
-        <Panel title="Member directory" eyebrow="Active and suspended">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="font-mono text-[.65rem] uppercase tracking-wider text-[#777]">
-                <tr>
-                  <th className="pb-4">Member</th>
-                  <th>Organization title</th>
-                  <th>Access</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#333]">
-                {memberRows.map((member) => (
-                  <tr key={member.id}>
-                    <td className="py-4">
-                      <strong>{member.displayName}</strong>
-                      <p className="mt-1 text-xs text-[#777]">{member.email}</p>
-                    </td>
-                    <td>{member.organizationRole}</td>
-                    <td>{member.accessRole.replaceAll("_", " ")}</td>
-                    <td
-                      className={
-                        member.status === "ACTIVE"
-                          ? "text-emerald-400"
-                          : "text-[#aaa]"
-                      }
-                    >
-                      {member.status}
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-3">
-                        {canMembers &&
-                          member.status === "ACTIVE" &&
-                          member.accessRole !== "SUPER_ADMIN" && (
-                            <form action={suspendMember}>
-                              <input
-                                type="hidden"
-                                name="memberId"
-                                value={member.id}
-                              />
-                              <button className="text-xs text-[#999] hover:text-white">
-                                Suspend
-                              </button>
-                            </form>
-                          )}
-                        {actor.accessRole === "SUPER_ADMIN" &&
-                          member.id !== actor.id && (
-                            <form action={deleteMember}>
-                              <input
-                                type="hidden"
-                                name="memberId"
-                                value={member.id}
-                              />
-                              <button className="text-xs text-red-400 hover:text-red-300">
-                                Delete account
-                              </button>
-                            </form>
-                          )}
-                      </div>
-                    </td>
+        {canReadMembers && tab === "members" && (
+          <Panel title="Member directory" eyebrow="Active and suspended">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="font-mono text-[.65rem] uppercase tracking-wider text-[#777]">
+                  <tr>
+                    <th className="pb-4">Member</th>
+                    <th>Organization title</th>
+                    <th>Access</th>
+                    <th>Status</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-        {canAccess && (
-          <Panel title="Roles and permissions" eyebrow="Super-admin controls">
-            <div className="space-y-6">
-              {memberRows
-                .filter(
-                  (member) =>
-                    member.status === "ACTIVE" &&
-                    member.accessRole !== "SUPER_ADMIN",
-                )
-                .map((member) => (
-                  <form
-                    action={updateMemberAccess}
-                    className="grid gap-5 border-t border-[#333] pt-6"
-                    key={member.id}
-                  >
-                    <input type="hidden" name="memberId" value={member.id} />
-                    <div>
-                      <strong>{member.displayName}</strong>
-                      <p className="mt-1 text-xs text-[#777]">{member.email}</p>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="Organization title">
-                        <input
-                          className="input"
-                          name="organizationRole"
-                          defaultValue={member.organizationRole}
-                          required
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-[1fr_260px]">
-                      <Field label="Public biography">
-                        <textarea
-                          className="input min-h-24"
-                          name="bio"
-                          defaultValue={member.bio}
-                        />
-                      </Field>
-                      <Field label="Access preset">
-                        <select
-                          className="input"
-                          name="accessRole"
-                          defaultValue={member.accessRole}
-                        >
-                          <option>MEMBER</option>
-                          <option>OFFICER</option>
-                          <option>CONTENT_ADMIN</option>
-                          <option>RECORDS_ADMIN</option>
-                          <option>FULL_ADMIN</option>
-                        </select>
-                      </Field>
-                    </div>
-                    <ProjectChecks
-                      projects={projectRows}
-                      selected={assignmentRows
-                        .filter((row) => row.memberId === member.id)
-                        .map((row) => row.projectId)}
-                    />
-                    <label className="flex items-center gap-3 text-sm">
-                      <input
-                        type="checkbox"
-                        name="isPublic"
-                        defaultChecked={member.isPublic}
-                      />{" "}
-                      Show approved profile in the public member directory
-                    </label>
-                    <div className="grid gap-3 lg:grid-cols-2">
-                      {permissionKeys
-                        .filter(
-                          (key) =>
-                            actor.accessRole === "SUPER_ADMIN" ||
-                            key !== "access.manage",
-                        )
-                        .map((key) => (
-                          <div
-                            className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border border-[#333] p-3 text-xs"
-                            key={key}
-                          >
-                            <span>{permissionLabels[key]}</span>
-                            <label>
-                              <input
-                                type="checkbox"
-                                name="allow"
-                                value={key}
-                                defaultChecked={member.permissionOverrides.allow.includes(
-                                  key,
-                                )}
-                              />{" "}
-                              Allow
-                            </label>
-                            <label>
-                              <input
-                                type="checkbox"
-                                name="deny"
-                                value={key}
-                                defaultChecked={member.permissionOverrides.deny.includes(
-                                  key,
-                                )}
-                              />{" "}
-                              Deny
-                            </label>
-                          </div>
-                        ))}
-                    </div>
-                    <button className="button w-fit">Save access</button>
-                  </form>
-                ))}
+                </thead>
+                <tbody className="divide-y divide-[#333]">
+                  {memberRows.map((member) => (
+                    <tr key={member.id}>
+                      <td className="py-4">
+                        {canEditMembers ||
+                        canAccess ||
+                        canViewHours ||
+                        canEvents ? (
+                          <AccountEditor
+                            account={{
+                              id: member.id,
+                              displayName: member.displayName,
+                              email: member.email,
+                              organizationRole: member.organizationRole,
+                              bio: member.bio,
+                              accessRole: member.accessRole,
+                              permissionOverrides: member.permissionOverrides,
+                              isPublic: member.isPublic,
+                              photoUrl:
+                                mediaRows.find(
+                                  (asset) => asset.id === member.photoMediaId,
+                                )?.blobUrl ?? member.photoUrl,
+                            }}
+                            uploaderId={actor.id}
+                            projects={projectRows}
+                            selectedProjects={assignmentRows
+                              .filter((row) => row.memberId === member.id)
+                              .map((row) => row.projectId)}
+                            canEditProfile={canEditMembers}
+                            canEditAccess={canAccess}
+                            isSuperAdmin={actor.accessRole === "SUPER_ADMIN"}
+                            isSelf={actor.id === member.id}
+                            triggerLabel={member.displayName}
+                            triggerClassName="text-left font-bold text-white transition-colors hover:text-[#fd7803] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#fd7803]"
+                            activity={
+                              canViewHours || canEvents
+                                ? {
+                                    hours: hourRows
+                                      .filter(
+                                        (row) =>
+                                          row.hour.memberId === member.id,
+                                      )
+                                      .map((row) => ({
+                                        id: row.hour.id,
+                                        date: row.hour.workDate.toLocaleDateString(
+                                          "en-US",
+                                          { timeZone: "America/Chicago" },
+                                        ),
+                                        minutes: row.hour.minutes,
+                                        project: row.hour.project,
+                                        category: row.hour.category,
+                                        description: row.hour.description,
+                                      })),
+                                    contributions: contributionRows
+                                      .filter(
+                                        (row) =>
+                                          row.contribution.memberId ===
+                                          member.id,
+                                      )
+                                      .map((row) => ({
+                                        id: row.contribution.id,
+                                        date: row.contribution.contributionDate.toLocaleDateString(
+                                          "en-US",
+                                          { timeZone: "America/Chicago" },
+                                        ),
+                                        title: row.contribution.title,
+                                        project: row.contribution.project,
+                                        category: row.contribution.category,
+                                        description:
+                                          row.contribution.description,
+                                      })),
+                                    attendance: attendanceRows
+                                      .filter(
+                                        (row) =>
+                                          row.attendance.memberId ===
+                                            member.id &&
+                                          row.attendance.status === "PRESENT",
+                                      )
+                                      .map((row) => {
+                                        const activity = activityRows.find(
+                                          (item) =>
+                                            item.id ===
+                                            row.attendance.activityId,
+                                        );
+                                        return {
+                                          id: row.attendance.id,
+                                          date: row.attendance.checkedInAt.toLocaleDateString(
+                                            "en-US",
+                                            { timeZone: "America/Chicago" },
+                                          ),
+                                          title:
+                                            activity?.title ?? "Team activity",
+                                          type: activity?.type ?? "EVENT",
+                                          topic: activity?.topic ?? null,
+                                          location: activity?.location ?? null,
+                                        };
+                                      }),
+                                  }
+                                : undefined
+                            }
+                          />
+                        ) : (
+                          <strong>{member.displayName}</strong>
+                        )}
+                        <p className="mt-1 text-xs text-[#777]">
+                          {member.email}
+                        </p>
+                      </td>
+                      <td>{member.organizationRole}</td>
+                      <td>{member.accessRole.replaceAll("_", " ")}</td>
+                      <td
+                        className={
+                          member.status === "ACTIVE"
+                            ? "text-emerald-400"
+                            : "text-[#aaa]"
+                        }
+                      >
+                        {member.status}
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-3">
+                          {canMembers &&
+                            member.status === "ACTIVE" &&
+                            member.accessRole !== "SUPER_ADMIN" && (
+                              <form action={suspendMember}>
+                                <input
+                                  type="hidden"
+                                  name="memberId"
+                                  value={member.id}
+                                />
+                                <button className="text-xs text-[#999] hover:text-white">
+                                  Suspend
+                                </button>
+                              </form>
+                            )}
+                          {canMembers && member.status === "SUSPENDED" && (
+                            <RestoreAccountButton
+                              memberId={member.id}
+                              memberName={member.displayName}
+                            />
+                          )}
+                          {actor.accessRole === "SUPER_ADMIN" &&
+                            member.id !== actor.id && (
+                              <DeleteAccountButton
+                                memberId={member.id}
+                                memberName={member.displayName}
+                              />
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </Panel>
         )}
-        {canEditHours && (
-          <Panel title="Team hour records" eyebrow="Corrections and voids">
-            <div className="space-y-5">
-              {hourRows.length ? (
-                hourRows.map(({ hour, memberName, memberRole }) => (
-                  <article
-                    className="border-t border-[#333] pt-5"
-                    key={hour.id}
-                  >
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <strong>{memberName}</strong>
-                        <p className="mt-1 text-xs text-[#777]">{memberRole}</p>
-                      </div>
-                      <form action={voidTeamHour}>
-                        <input type="hidden" name="hourId" value={hour.id} />
-                        <button className="text-xs text-red-400 hover:text-red-300">
-                          Void entry
-                        </button>
-                      </form>
-                    </div>
-                    <form action={updateTeamHour} className="grid gap-4">
-                      <input type="hidden" name="hourId" value={hour.id} />
-                      <div className="grid gap-4 md:grid-cols-4">
-                        <Field label="Date">
-                          <input
-                            className="input"
-                            name="date"
-                            type="date"
-                            defaultValue={hour.workDate
-                              .toISOString()
-                              .slice(0, 10)}
-                            required
-                          />
-                        </Field>
-                        <Field label="Hours">
-                          <input
-                            className="input"
-                            name="hours"
-                            type="number"
-                            min="0.01"
-                            max="24"
-                            step="0.01"
-                            defaultValue={(hour.minutes / 60).toFixed(2)}
-                            required
-                          />
-                        </Field>
-                        <Field label="Project">
-                          <input
-                            className="input"
-                            name="project"
-                            defaultValue={hour.project}
-                            required
-                          />
-                        </Field>
-                        <Field label="Category">
-                          <input
-                            className="input"
-                            name="category"
-                            defaultValue={hour.category}
-                            required
-                          />
-                        </Field>
-                      </div>
-                      <Field label="Description">
-                        <textarea
-                          className="input min-h-20"
-                          name="description"
-                          defaultValue={hour.description}
-                          required
-                        />
-                      </Field>
-                      <button className="button secondary w-fit">
-                        Save correction
-                      </button>
-                    </form>
-                  </article>
-                ))
-              ) : (
-                <Empty>No hour entries have been submitted.</Empty>
-              )}
-            </div>
+        {canViewHours && tab === "activity" && (
+          <Panel title="Team activity log" eyebrow="Hours and contributions">
+            <ActivityLog records={activityRecords} canEdit={canEditHours} />
           </Panel>
         )}
-        {canContent && (
+        {canContent && tab === "content" && (
           <Panel title="Write a news post" eyebrow="Blog editor">
-            <form action={createPost} className="grid gap-5">
+            <ActionForm
+              action={createPost}
+              successMessage="Story saved."
+              className="grid gap-5"
+            >
               <div className="grid gap-5 md:grid-cols-2">
                 <Field label="Title">
                   <input className="input" name="title" required />
@@ -525,13 +1328,28 @@ export default async function AdminPage() {
               <Field label="Excerpt">
                 <textarea className="input min-h-24" name="excerpt" required />
               </Field>
-              <Field label="Cover image URL">
-                <input
-                  className="input"
-                  name="coverImageUrl"
-                  type="url"
-                  placeholder="https://…"
+              <Field label="Cover image">
+                <ImageUpload
+                  name="coverMediaId"
+                  removeName="removeCover"
+                  purpose="post-cover"
+                  uploaderId={actor.id}
+                  label="Choose cover image"
                 />
+              </Field>
+              <GalleryAttachmentFields events={galleryEventRows} />
+              <Field label="Article and social media embeds">
+                <textarea
+                  className="input min-h-28"
+                  name="embedUrls"
+                  placeholder={
+                    "One HTTPS link per line\nhttps://www.youtube.com/watch?v=…\nhttps://www.instagram.com/p/…"
+                  }
+                />
+                <span className="text-xs leading-5 text-[#777]">
+                  Add articles, YouTube, Vimeo, Instagram, TikTok, Facebook,
+                  LinkedIn, or X links. Safe previews appear below the story.
+                </span>
               </Field>
               <Field label="Story">
                 <BlogEditor />
@@ -543,7 +1361,7 @@ export default async function AdminPage() {
                 </select>
                 <button className="button">Save story</button>
               </div>
-            </form>
+            </ActionForm>
             <div className="mt-8 divide-y divide-[#333] border-t border-[#333]">
               {postRows.map((post) => (
                 <details className="py-4" key={post.id}>
@@ -554,8 +1372,9 @@ export default async function AdminPage() {
                     </div>
                     <span className="tag">{post.status} · Edit</span>
                   </summary>
-                  <form
+                  <ActionForm
                     action={updatePost}
+                    successMessage="Story changes saved."
                     className="mt-6 grid gap-5 border border-[#333] p-5"
                   >
                     <input type="hidden" name="postId" value={post.id} />
@@ -586,12 +1405,36 @@ export default async function AdminPage() {
                         required
                       />
                     </Field>
-                    <Field label="Cover image URL">
-                      <input
-                        className="input"
-                        name="coverImageUrl"
-                        type="url"
-                        defaultValue={post.coverImageUrl ?? ""}
+                    <Field label="Cover image">
+                      <ImageUpload
+                        name="coverMediaId"
+                        removeName="removeCover"
+                        purpose="post-cover"
+                        uploaderId={actor.id}
+                        currentUrl={
+                          mediaRows.find(
+                            (asset) => asset.id === post.coverMediaId,
+                          )?.blobUrl ?? post.coverImageUrl
+                        }
+                        label="Replace cover image"
+                      />
+                    </Field>
+                    <GalleryAttachmentFields
+                      events={galleryEventRows}
+                      currentIds={
+                        post.galleryEventIds.length
+                          ? post.galleryEventIds
+                          : post.galleryEventId
+                            ? [post.galleryEventId]
+                            : []
+                      }
+                    />
+                    <Field label="Article and social media embeds">
+                      <textarea
+                        className="input min-h-28"
+                        name="embedUrls"
+                        defaultValue={post.embedUrls.join("\n")}
+                        placeholder="One HTTPS link per line"
                       />
                     </Field>
                     <Field label="Story">
@@ -610,7 +1453,7 @@ export default async function AdminPage() {
                       </select>
                       <button className="button">Save changes</button>
                     </div>
-                  </form>
+                  </ActionForm>
                   <form action={deletePost} className="mt-3">
                     <input type="hidden" name="postId" value={post.id} />
                     <button className="text-xs text-red-400 hover:text-red-300">
@@ -622,7 +1465,51 @@ export default async function AdminPage() {
             </div>
           </Panel>
         )}
-        {canMedia && (
+        {canDirectory && tab === "members" && (
+          <Panel title="Public team and program cards" eyebrow="Roster manager">
+            <p className="mb-6 max-w-3xl text-sm leading-7 text-[#999]">
+              Each page keeps an independent card. Updating a student here
+              changes only the selected page and section.
+            </p>
+            <RosterManager
+              uploaderId={actor.id}
+              cards={rosterRows.map(({ card, blobUrl }) => ({
+                id: card.id,
+                page: card.page,
+                section: card.section,
+                name: card.name,
+                title: card.title,
+                bio: card.bio,
+                photoUrl: blobUrl ?? card.photoUrl,
+                sortOrder: card.sortOrder,
+                published: card.published,
+                archivedAt: card.archivedAt,
+              }))}
+            />
+          </Panel>
+        )}
+        {canSponsors && tab === "sponsors" && (
+          <Panel
+            id="sponsor-manager"
+            title="Sponsor manager"
+            eyebrow="Sponsors"
+          >
+            <SponsorManager
+              uploaderId={actor.id}
+              sponsors={sponsorRows.map(({ sponsor, blobUrl }) => ({
+                id: sponsor.id,
+                name: sponsor.name,
+                sponsorship: sponsor.sponsorship,
+                tier: sponsor.tier,
+                websiteUrl: sponsor.websiteUrl,
+                logoUrl: blobUrl ?? sponsor.logoUrl,
+                sortOrder: sponsor.sortOrder,
+                published: sponsor.published,
+              }))}
+            />
+          </Panel>
+        )}
+        {canMedia && tab === "media" && (
           <Panel title="Shared Drive media" eyebrow="Automatic publishing">
             <div className="flex flex-wrap items-center justify-between gap-5">
               <p className="max-w-2xl text-sm leading-7 text-[#999]">
@@ -632,31 +1519,56 @@ export default async function AdminPage() {
               </p>
               <DriveSyncForm />
             </div>
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-              {mediaRows.map((asset) => (
-                <div
-                  className="relative aspect-square overflow-hidden border border-[#333]"
-                  key={asset.id}
-                >
-                  {asset.mimeType.startsWith("video/") ? (
-                    <video className="h-full w-full object-cover" controls preload="metadata">
-                      <source src={asset.blobUrl} type={asset.mimeType} />
-                    </video>
-                  ) : (
-                    <Image
-                      className="object-cover"
-                      src={asset.blobUrl}
-                      alt={asset.alt}
-                      fill
-                      sizes="160px"
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
+            <GalleryManager
+              uploaderId={actor.id}
+              events={[
+                ...galleryEventRows.map((event) => ({
+                  id: event.id,
+                  title: event.title,
+                  description: event.description,
+                  eventDate: event.eventDate?.toISOString() ?? null,
+                  driveFolderId: event.driveFolderId,
+                  published: event.published,
+                  legacyAlbum: null,
+                })),
+                ...[
+                  ...new Set(
+                    galleryRows
+                      .filter((asset) => !asset.galleryEventId)
+                      .map((asset) => asset.album)
+                      .filter(Boolean),
+                  ),
+                ]
+                  .filter(
+                    (album) =>
+                      !galleryEventRows.some(
+                        (event) =>
+                          event.title.toLowerCase() === album.toLowerCase(),
+                      ),
+                  )
+                  .map((album) => ({
+                    id: `legacy:${encodeURIComponent(album)}`,
+                    title: album,
+                    description: "Existing Drive gallery",
+                    eventDate: null,
+                    driveFolderId: null,
+                    published: true,
+                    legacyAlbum: album,
+                  })),
+              ]}
+              assets={galleryRows.map((asset) => ({
+                id: asset.id,
+                blobUrl: asset.blobUrl,
+                filename: asset.filename,
+                mimeType: asset.mimeType,
+                alt: asset.alt,
+                album: asset.album,
+                galleryEventId: asset.galleryEventId,
+              }))}
+            />
           </Panel>
         )}
-        {canInquiries && (
+        {canInquiries && tab === "inquiries" && (
           <Panel title="Inquiry inbox" eyebrow="Contact, join, and sponsors">
             <div className="divide-y divide-[#333]">
               {inquiryRows.length ? (
@@ -757,21 +1669,101 @@ function Metric({ value, label }: { value: string; label: string }) {
     </div>
   );
 }
+function OverviewCard({
+  value,
+  title,
+  detail,
+  href,
+}: {
+  value: string;
+  title: string;
+  detail: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group border border-[#343434] bg-[#101010] p-5 transition hover:-translate-y-1 hover:border-[#fd7803] hover:bg-[#17120d]"
+    >
+      <strong className="font-mono text-2xl text-[#fd7803]">{value}</strong>
+      <h3 className="mt-4 font-bold group-hover:text-white">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-[#888]">{detail}</p>
+      <span className="mt-5 inline-block text-xs font-bold uppercase tracking-[.1em] text-[#fd7803]">
+        Review &rarr;
+      </span>
+    </Link>
+  );
+}
 function Panel({
+  id,
   title,
   eyebrow,
   children,
 }: {
+  id?: string;
   title: string;
   eyebrow: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="card mt-7 p-6 md:p-8">
+    <section id={id} className="card mt-7 min-w-0 scroll-mt-24 p-5 sm:p-6 md:p-8">
       <p className="eyebrow">{eyebrow}</p>
       <h2 className="mb-6 mt-4 text-2xl font-bold">{title}</h2>
       {children}
     </section>
+  );
+}
+function GalleryAttachmentFields({
+  events,
+  currentIds = [],
+}: {
+  events: Array<typeof galleryEvents.$inferSelect>;
+  currentIds?: string[];
+}) {
+  return (
+    <fieldset className="grid gap-4 border border-[#333] bg-[#0d0d0d] p-5">
+      <legend className="px-2 font-mono text-[.68rem] uppercase tracking-wider text-[#fd7803]">
+        Photo gallery
+      </legend>
+      <p className="text-sm leading-6 text-[#888]">
+        Attach one or more existing event galleries, or create a new event
+        gallery for this story and optionally connect its public Google Drive
+        folder.
+      </p>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label="Existing event gallery">
+          <select
+            className="input min-h-36"
+            name="galleryEventIds"
+            defaultValue={currentIds}
+            multiple
+          >
+            {events.map((event) => (
+              <option value={event.id} key={event.id}>
+                {event.title}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs leading-5 text-[#777]">
+            Hold Ctrl on Windows or Command on Mac to select several galleries.
+          </span>
+        </Field>
+        <Field label="Or create a new gallery">
+          <input
+            className="input"
+            name="newGalleryTitle"
+            placeholder="Event gallery name"
+          />
+        </Field>
+      </div>
+      <Field label="New gallery Google Drive folder (optional)">
+        <input
+          className="input"
+          name="galleryDriveFolder"
+          placeholder="https://drive.google.com/drive/folders/..."
+        />
+      </Field>
+    </fieldset>
   );
 }
 function Field({

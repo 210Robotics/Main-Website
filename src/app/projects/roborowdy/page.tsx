@@ -5,20 +5,23 @@ import {
   NumberedList,
   SplitFeature,
 } from "@/components/content-blocks";
-import { members } from "@/lib/site-data";
+import { getRosterCards } from "@/lib/public-people";
+import { getWebsitePageContent } from "@/lib/site-content";
 
 export const metadata: Metadata = { title: "RoboRowdy" };
-export default function RoboRowdy() {
-  const team = members.filter((member) =>
-    member.projects.includes("RoboRowdy"),
-  );
+export const dynamic = "force-dynamic";
+export default async function RoboRowdy() {
+  const [team, content] = await Promise.all([
+    getRosterCards("ROBOROWDY"),
+    getWebsitePageContent("roborowdy"),
+  ]);
   return (
     <>
       <PageHero
-        eyebrow="Autonomous production"
-        title="Meet RoboRowdy."
-        body="The global-winning autonomous print-farm assistant designed to remove finished parts, clean and reset build plates, and start the next job with less human intervention."
-        image="/media/gallery/siemens/siemens-2.jpg"
+        eyebrow={content.heroEyebrow}
+        title={content.heroTitle}
+        body={content.heroBody}
+        image={content.heroImage}
       />
       <Metrics
         items={[
@@ -29,24 +32,24 @@ export default function RoboRowdy() {
         ]}
       />
       <SplitFeature
-        eyebrow="Why it matters"
-        title="The printer is fast. The handoff is not."
-        body="In a print farm, every completed part can wait for an operator to unload it, prepare the surface, and begin again. RoboRowdy explores how autonomy can make the gaps between jobs shorter, safer, and more consistent."
-        image="/media/gallery/siemens/siemens-3.jpg"
+        eyebrow={content.whyEyebrow}
+        title={content.whyTitle}
+        body={content.whyBody}
+        image={content.whyImage}
       >
         <NumberedList
           items={[
             {
-              title: "Remove",
-              body: "Identify a completed job and safely separate the part from the build surface.",
+              title: content.step1Title,
+              body: content.step1Body,
             },
             {
-              title: "Reset",
-              body: "Clear debris and prepare the plate for consistent first-layer performance.",
+              title: content.step2Title,
+              body: content.step2Body,
             },
             {
-              title: "Restart",
-              body: "Coordinate with the production queue so the next approved job can begin.",
+              title: content.step3Title,
+              body: content.step3Body,
             },
           ]}
         />
@@ -54,26 +57,26 @@ export default function RoboRowdy() {
       <section className="section border-y border-[#282828] bg-[#0d0d0d]">
         <div className="shell">
           <SectionHeading
-            eyebrow="Development story"
-            title="A workflow, not just a robot."
-            body="The strongest concept connects physical automation to human supervision, software orchestration, safety, maintenance, and measurable production value."
+            eyebrow={content.storyEyebrow}
+            title={content.storyTitle}
+            body={content.storyBody}
           />
           <div className="grid gap-5 md:grid-cols-3">
             {[
               {
-                t: "Human-centered",
-                b: "Operators stay in control of exceptions, scheduling, maintenance, and quality decisions.",
+                t: content.story1Title,
+                b: content.story1Body,
               },
               {
-                t: "Sustainable",
-                b: "Better utilization reduces idle energy, failed restarts, and wasted production capacity.",
+                t: content.story2Title,
+                b: content.story2Body,
               },
               {
-                t: "Scalable",
-                b: "A modular workflow can grow from one printer cell to a connected fleet.",
+                t: content.story3Title,
+                b: content.story3Body,
               },
-            ].map((x) => (
-              <div className="card interactive-card p-7" key={x.t}>
+            ].map((x, index) => (
+              <div className="card interactive-card p-7" key={`${index}-${x.t}`}>
                 <h3 className="text-2xl font-bold">{x.t}</h3>
                 <p className="mt-4 text-sm leading-7 text-[#999]">{x.b}</p>
               </div>
@@ -84,16 +87,16 @@ export default function RoboRowdy() {
       <section className="section">
         <div className="shell">
           <SectionHeading
-            eyebrow="RoboRowdy team"
-            title="The people behind the system."
-            body="Project responsibilities are shown here instead of organization-wide officer titles."
+            eyebrow={content.teamEyebrow}
+            title={content.teamTitle}
+            body={content.teamBody}
           />
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {team.map((member) => (
               <MemberCard
                 key={member.id}
                 member={member}
-                role={member.sidcRole ?? "Project Contributor"}
+                role={member.role}
               />
             ))}
           </div>

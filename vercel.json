@@ -6,6 +6,14 @@
     {
       "path": "/api/cron/sync-media",
       "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/operations",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/discord",
+      "schedule": "30 12 * * *"
     }
   ]
 }

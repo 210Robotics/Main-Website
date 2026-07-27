@@ -1,0 +1,66 @@
+CREATE TYPE "public"."roster_page" AS ENUM('TEAM', 'VEX_U', 'SIDC', 'ROBOROWDY');--> statement-breakpoint
+CREATE TABLE "public_profile_cards" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"legacy_key" text,
+	"page" "roster_page" NOT NULL,
+	"section" text DEFAULT 'people' NOT NULL,
+	"name" text NOT NULL,
+	"title" text NOT NULL,
+	"bio" text DEFAULT '' NOT NULL,
+	"photo_url" text,
+	"photo_media_id" uuid,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"published" boolean DEFAULT true NOT NULL,
+	"archived_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "public_profile_cards_legacy_key_unique" UNIQUE("legacy_key")
+);
+--> statement-breakpoint
+ALTER TABLE "media_assets" ADD COLUMN "source" text DEFAULT 'drive' NOT NULL;--> statement-breakpoint
+ALTER TABLE "media_assets" ADD COLUMN "uploaded_by_member_id" uuid;--> statement-breakpoint
+ALTER TABLE "members" ADD COLUMN "photo_media_id" uuid;--> statement-breakpoint
+ALTER TABLE "public_profile_cards" ADD CONSTRAINT "public_profile_cards_photo_media_id_media_assets_id_fk" FOREIGN KEY ("photo_media_id") REFERENCES "public"."media_assets"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "profile_cards_page_section_order_idx" ON "public_profile_cards" USING btree ("page","section","sort_order");--> statement-breakpoint
+INSERT INTO "public_profile_cards" ("legacy_key", "page", "section", "name", "title", "bio", "photo_url", "sort_order") VALUES
+('team-leadership-jacob-white', 'TEAM', 'leadership', 'Jacob White', 'President', 'Leads organization strategy, partnerships, and the season-wide mission for 210 Robotics.', '/media/team/jacob-white.jpg', 10),
+('team-leadership-josef-ybarra', 'TEAM', 'leadership', 'Josef Ybarra', 'Vice President of Operations', 'Coordinates competition readiness, project execution, and organization-wide operations.', '/media/team/josef-ybarra.jpg', 20),
+('team-leadership-dyshana-torres', 'TEAM', 'leadership', 'Dyshana Torres Rivera', 'Vice President of Internal Affairs', 'Developed the software and controls work behind RoboRowdy while strengthening team collaboration.', '/media/team/dyshana-torres.jpg', 30),
+('team-leadership-kristal-cayabyab', 'TEAM', 'leadership', 'Kristal Cayabyab', 'Outreach and Communications Officer', 'Connects 210 Robotics with students, industry partners, and the San Antonio community.', '/media/team/kristal-cayabyab.jpg', 40),
+('team-leadership-gray-samaniego', 'TEAM', 'leadership', 'Gray Samaniego', 'Finance Officer', 'Built the project business case, sustainability story, and quantitative impact model.', '/media/team/gray-samaniego.jpg', 50),
+('team-leadership-israel-elizondo', 'TEAM', 'leadership', 'Israel Elizondo', 'Build Officer', 'Founded and led the multidisciplinary RoboRowdy team from concept through the global final.', '/media/team/israel-elizondo.jpg', 60),
+('team-leadership-landon-smith', 'TEAM', 'leadership', 'Landon Smith', 'Systems Officer', 'Leads programming, electrical integration, controls, and system reliability.', '/media/team/landon-smith.jpg', 70),
+('team-leadership-andrew-romo', 'TEAM', 'leadership', 'Andrew Romo', 'Logistics Officer', 'Contributed mechanical design, fabrication, integration, and prototype development.', '/media/team/andrew-romo.jpg', 80),
+('team-contributors-dyshana-torres', 'TEAM', 'contributors', 'Dyshana Torres Rivera', 'Software & Controls', 'Developed the software and controls work behind RoboRowdy while strengthening team collaboration.', '/media/team/dyshana-torres.jpg', 10),
+('team-contributors-gray-samaniego', 'TEAM', 'contributors', 'Gray Samaniego', 'Business & Sustainability', 'Built the project business case, sustainability story, and quantitative impact model.', '/media/team/gray-samaniego.jpg', 20),
+('team-contributors-israel-elizondo', 'TEAM', 'contributors', 'Israel Elizondo', 'Project Lead', 'Founded and led the multidisciplinary RoboRowdy team from concept through the global final.', '/media/team/israel-elizondo.jpg', 30),
+('team-contributors-andrew-romo', 'TEAM', 'contributors', 'Andrew Romo', 'Mechanical Engineering', 'Contributed mechanical design, fabrication, integration, and prototype development.', '/media/team/andrew-romo.jpg', 40),
+('team-contributors-darik-pratt', 'TEAM', 'contributors', 'Darik Pratt', 'Mechanical Engineering', 'Supported mechanical design, simulation-led decisions, and hands-on project assembly.', '/media/team/darik-pratt.jpg', 50),
+('team-contributors-vian-chen', 'TEAM', 'contributors', 'Vian Chen', 'Software & Automation', 'Developed software and automation systems for RoboRowdy.', '/media/team/vian-chen.jpg', 60),
+('team-contributors-roman-benavides', 'TEAM', 'contributors', 'Roman Benavides', 'Systems Integration', 'Connected mechanical, human, and production needs through prototyping and integration.', '/media/team/roman-benavides.jpg', 70),
+('team-contributors-jiseo-chon', 'TEAM', 'contributors', 'Jiseo Chon', 'Mechanical Engineering', 'Contributed mechanical engineering, prototyping, and physical-system development.', NULL, 80),
+('team-advisor-don-petersen', 'TEAM', 'advisor', 'Don Petersen, Ph.D.', 'Faculty Advisor', 'Faculty advisor to 210 Robotics, supporting the team with engineering guidance, mentorship, and university connections.', '/media/brand/makerspace.png', 10),
+('vex-u-jacob-white', 'VEX_U', 'people', 'Jacob White', 'President', 'Leads organization strategy, partnerships, and the season-wide mission for 210 Robotics.', '/media/team/jacob-white.jpg', 10),
+('vex-u-josef-ybarra', 'VEX_U', 'people', 'Josef Ybarra', 'Vice President of Operations', 'Coordinates competition readiness, project execution, and organization-wide operations.', '/media/team/josef-ybarra.jpg', 20),
+('vex-u-dyshana-torres', 'VEX_U', 'people', 'Dyshana Torres Rivera', 'Vice President of Internal Affairs', 'Developed the software and controls work behind RoboRowdy while strengthening team collaboration.', '/media/team/dyshana-torres.jpg', 30),
+('vex-u-kristal-cayabyab', 'VEX_U', 'people', 'Kristal Cayabyab', 'Outreach and Communications Officer', 'Connects 210 Robotics with students, industry partners, and the San Antonio community.', '/media/team/kristal-cayabyab.jpg', 40),
+('vex-u-gray-samaniego', 'VEX_U', 'people', 'Gray Samaniego', 'Finance Officer', 'Built the project business case, sustainability story, and quantitative impact model.', '/media/team/gray-samaniego.jpg', 50),
+('vex-u-israel-elizondo', 'VEX_U', 'people', 'Israel Elizondo', 'Build Officer', 'Founded and led the multidisciplinary RoboRowdy team from concept through the global final.', '/media/team/israel-elizondo.jpg', 60),
+('vex-u-landon-smith', 'VEX_U', 'people', 'Landon Smith', 'Systems Officer', 'Leads programming, electrical integration, controls, and system reliability.', '/media/team/landon-smith.jpg', 70),
+('vex-u-andrew-romo', 'VEX_U', 'people', 'Andrew Romo', 'Logistics Officer', 'Contributed mechanical design, fabrication, integration, and prototype development.', '/media/team/andrew-romo.jpg', 80),
+('sidc-dyshana-torres', 'SIDC', 'people', 'Dyshana Torres Rivera', 'Software & Controls', 'Developed the software and controls work behind RoboRowdy while strengthening team collaboration.', '/media/team/dyshana-torres.jpg', 10),
+('sidc-gray-samaniego', 'SIDC', 'people', 'Gray Samaniego', 'Business & Sustainability', 'Built the project business case, sustainability story, and quantitative impact model.', '/media/team/gray-samaniego.jpg', 20),
+('sidc-israel-elizondo', 'SIDC', 'people', 'Israel Elizondo', 'Project Lead', 'Founded and led the multidisciplinary RoboRowdy team from concept through the global final.', '/media/team/israel-elizondo.jpg', 30),
+('sidc-andrew-romo', 'SIDC', 'people', 'Andrew Romo', 'Mechanical Engineering', 'Contributed mechanical design, fabrication, integration, and prototype development.', '/media/team/andrew-romo.jpg', 40),
+('sidc-darik-pratt', 'SIDC', 'people', 'Darik Pratt', 'Mechanical Engineering', 'Supported mechanical design, simulation-led decisions, and hands-on project assembly.', '/media/team/darik-pratt.jpg', 50),
+('sidc-vian-chen', 'SIDC', 'people', 'Vian Chen', 'Software & Automation', 'Developed software and automation systems for RoboRowdy.', '/media/team/vian-chen.jpg', 60),
+('sidc-roman-benavides', 'SIDC', 'people', 'Roman Benavides', 'Systems Integration', 'Connected mechanical, human, and production needs through prototyping and integration.', '/media/team/roman-benavides.jpg', 70),
+('sidc-jiseo-chon', 'SIDC', 'people', 'Jiseo Chon', 'Mechanical Engineering', 'Contributed mechanical engineering, prototyping, and physical-system development.', NULL, 80),
+('roborowdy-dyshana-torres', 'ROBOROWDY', 'people', 'Dyshana Torres Rivera', 'Software & Controls', 'Developed the software and controls work behind RoboRowdy while strengthening team collaboration.', '/media/team/dyshana-torres.jpg', 10),
+('roborowdy-gray-samaniego', 'ROBOROWDY', 'people', 'Gray Samaniego', 'Business & Sustainability', 'Built the project business case, sustainability story, and quantitative impact model.', '/media/team/gray-samaniego.jpg', 20),
+('roborowdy-israel-elizondo', 'ROBOROWDY', 'people', 'Israel Elizondo', 'Project Lead', 'Founded and led the multidisciplinary RoboRowdy team from concept through the global final.', '/media/team/israel-elizondo.jpg', 30),
+('roborowdy-andrew-romo', 'ROBOROWDY', 'people', 'Andrew Romo', 'Mechanical Engineering', 'Contributed mechanical design, fabrication, integration, and prototype development.', '/media/team/andrew-romo.jpg', 40),
+('roborowdy-darik-pratt', 'ROBOROWDY', 'people', 'Darik Pratt', 'Mechanical Engineering', 'Supported mechanical design, simulation-led decisions, and hands-on project assembly.', '/media/team/darik-pratt.jpg', 50),
+('roborowdy-vian-chen', 'ROBOROWDY', 'people', 'Vian Chen', 'Software & Automation', 'Developed software and automation systems for RoboRowdy.', '/media/team/vian-chen.jpg', 60),
+('roborowdy-roman-benavides', 'ROBOROWDY', 'people', 'Roman Benavides', 'Systems Integration', 'Connected mechanical, human, and production needs through prototyping and integration.', '/media/team/roman-benavides.jpg', 70),
+('roborowdy-jiseo-chon', 'ROBOROWDY', 'people', 'Jiseo Chon', 'Mechanical Engineering', 'Contributed mechanical engineering, prototyping, and physical-system development.', NULL, 80);

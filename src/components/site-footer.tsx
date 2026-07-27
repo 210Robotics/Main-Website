@@ -4,7 +4,7 @@ import { Code2, Globe2, Mail, Share2 } from "lucide-react";
 
 export function SiteFooter() {
   return (
-    <footer className="border-t border-[#282828] bg-[#070707]">
+    <footer className="site-footer border-t border-[#282828] bg-[#070707]">
       <div className="shell grid gap-12 py-16 md:grid-cols-[1.5fr_1fr_1fr]">
         <div>
           <div className="relative h-14 w-48 overflow-hidden bg-black">
@@ -29,6 +29,7 @@ export function SiteFooter() {
             <Link href="/events">Events</Link>
             <Link href="/media">Media</Link>
             <Link href="/resources">Resources</Link>
+            <Link href="/impact">Annual impact</Link>
           </div>
         </div>
         <div>
@@ -38,6 +39,14 @@ export function SiteFooter() {
             href="mailto:admin@210robotics.com"
           >
             admin@210robotics.com
+          </a>
+          <a
+            className="mt-3 block text-sm text-[#bbb] transition hover:text-white"
+            href="https://discord.gg/ZZXjwnzqv"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Join our Discord
           </a>
           <div className="mt-6 flex gap-3">
             <a
@@ -80,7 +89,15 @@ export function SiteFooter() {
       <div className="border-t border-[#242424]">
         <div className="shell flex flex-wrap justify-between gap-3 py-5 font-mono text-[.65rem] uppercase tracking-wider text-[#777]">
           <span>© 2026 210 Robotics</span>
-          <span>Built by students. Driven by curiosity.</span>
+          <span className="flex flex-wrap gap-x-4 gap-y-2">
+            <Link className="transition hover:text-white" href="/privacy">
+              Privacy
+            </Link>
+            <Link className="transition hover:text-white" href="/terms">
+              Terms
+            </Link>
+            <span>Built by students. Driven by curiosity.</span>
+          </span>
         </div>
       </div>
     </footer>
