@@ -40,6 +40,7 @@ import { DiscordMessageComposer } from "@/components/discord-message-composer";
 import { DiscordMeetingTranscription } from "@/components/discord-meeting-transcription";
 import { DiscordBrowserRecorder } from "@/components/discord-browser-recorder";
 import { DiscordSectionMenu } from "@/components/discord-section-menu";
+import { DiscordVoiceSpeaker } from "@/components/discord-voice-speaker";
 import { requirePermission } from "@/lib/auth";
 import {
   checkDiscordGuildAccess,
@@ -512,11 +513,11 @@ export async function DiscordAdminPanel({
             {interactionEndpoint}
           </code>
           <p className="mt-4 text-xs leading-6 text-[#777]">
-            Available commands: /ask, /record, /setup, /register, /status,
-            /dues, and /team. /ask is powered only by the configured Gemini
-            service. /record opens this admin recording workspace with the
-            meeting title and voice channel preselected.
-            Account links are private, expire after seven days, and work once.
+            Available commands: /ask, /record, /stopall, /setup, /register,
+            /status, /dues, and /team. /ask is powered only by the configured
+            Gemini service. /record joins and records the selected voice
+            channel; /stopall finalizes every active recording. Account links
+            are private, expire after seven days, and work once.
           </p>
         </div>
       </div>
@@ -811,6 +812,11 @@ export async function DiscordAdminPanel({
               </span>
             </div>
           </div>
+          <DiscordVoiceSpeaker
+            guildId={guild.id}
+            voiceChannels={voiceChannelOptions}
+            configured={voiceWorker.configured}
+          />
           <DiscordMeetingTranscription
             guildId={guild.id}
             uploaderId={actor.id}
