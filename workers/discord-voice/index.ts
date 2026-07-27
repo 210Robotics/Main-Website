@@ -26,6 +26,7 @@ import {
   ChannelType,
   Client,
   GatewayIntentBits,
+  Partials,
   type VoiceBasedChannel,
 } from "discord.js";
 import ffmpegPath from "ffmpeg-static";
@@ -95,7 +96,9 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.DirectMessages,
   ],
+  partials: [Partials.Channel],
 });
 const sessions = new Map<string, RecordingSession>();
 const speechQueues = new Map<string, Promise<void>>();
@@ -755,13 +758,53 @@ client.on("voiceStateUpdate", (oldState, newState) => {
 });
 
 client.on("messageCreate", (message) => {
-  if (!message.inGuild() || message.author.bot) return;
+  if (message.author.bot) return;
   void (async () => {
     const siteUrl = (
       process.env.SITE_URL || "https://210robotics.com"
     ).replace(/\/$/, "");
     const secret = process.env.DISCORD_VOICE_WORKER_SECRET;
     if (!secret) return;
+    if (!message.inGuild()) {
+      const response = await fetch(
+        `${siteUrl}/api/discord/direct-message-events`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${secret}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            channelId: message.channel.id,
+            messageId: message.id,
+            content: message.content || "",
+            timestamp: message.createdAt.toISOString(),
+            author: {
+              id: message.author.id,
+              username: message.author.username,
+              displayName:
+                message.author.globalName || message.author.username,
+              avatar: message.author.avatar,
+            },
+            attachments: message.attachments.map((attachment) => ({
+              id: attachment.id,
+              filename: attachment.name,
+              url: attachment.url,
+              contentType: attachment.contentType,
+              size: attachment.size,
+            })),
+          }),
+          signal: AbortSignal.timeout(60_000),
+        },
+      );
+      if (!response.ok) {
+        const detail = (await response.text()).slice(0, 500);
+        throw new Error(
+          `Website private DM workflow returned ${response.status}: ${detail}`,
+        );
+      }
+      return;
+    }
     const response = await fetch(
       `${siteUrl}/api/discord/message-events`,
       {
@@ -821,7 +864,7 @@ client.on("messageCreate", (message) => {
     console.error(
       JSON.stringify({
         event: "discord.message.log_or_reaction_failed",
-        guildId: message.guild.id,
+        guildId: message.guild?.id || null,
         channelId: message.channel.id,
         messageId: message.id,
         error: error instanceof Error ? error.message : String(error),
@@ -838,6 +881,7 @@ const server = createServer(async (request, response) => {
       speechReady: true,
       speakerAttributionReady: true,
       dynamicReactionsReady: true,
+      geminiDirectMessagesReady: true,
     });
   }
   if (!authorized(request)) {

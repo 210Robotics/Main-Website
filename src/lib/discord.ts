@@ -16,6 +16,7 @@ import { getDb } from "@/db";
 import {
   discordCalendarReminders,
   discordChannels,
+  discordDirectMessages,
   discordEvents,
   discordGuildMembers,
   discordGuilds,
@@ -1235,9 +1236,17 @@ export async function sendDiscordChannelMessage({
 export async function sendDiscordDirectMessage({
   discordUserId,
   content,
+  log,
 }: {
   discordUserId: string;
   content: string;
+  log?: {
+    username?: string;
+    displayName?: string;
+    aiGenerated?: boolean;
+    replyToMessageId?: string | null;
+    metadata?: Record<string, unknown>;
+  };
 }) {
   const message = content.trim().slice(0, 2_000);
   if (!/^\d{15,22}$/.test(discordUserId)) {
@@ -1248,7 +1257,7 @@ export async function sendDiscordDirectMessage({
     method: "POST",
     body: JSON.stringify({ recipient_id: discordUserId }),
   });
-  return discordFetch<{ id: string; timestamp: string }>(
+  const sent = await discordFetch<{ id: string; timestamp: string }>(
     `/channels/${channel.id}/messages`,
     {
       method: "POST",
@@ -1258,6 +1267,115 @@ export async function sendDiscordDirectMessage({
       }),
     },
   );
+  const [knownMember] = await getDb()
+    .select({
+      username: discordGuildMembers.username,
+      displayName: discordGuildMembers.displayName,
+    })
+    .from(discordGuildMembers)
+    .where(eq(discordGuildMembers.discordUserId, discordUserId))
+    .limit(1);
+  await getDb()
+    .insert(discordDirectMessages)
+    .values({
+      id: sent.id,
+      channelId: channel.id,
+      discordUserId,
+      username: log?.username || knownMember?.username || discordUserId,
+      displayName:
+        log?.displayName || knownMember?.displayName || knownMember?.username || discordUserId,
+      direction: "OUTBOUND",
+      content: message,
+      aiGenerated: Boolean(log?.aiGenerated),
+      replyToMessageId: log?.replyToMessageId || null,
+      metadata: log?.metadata || {},
+      discordCreatedAt: new Date(sent.timestamp),
+    })
+    .onConflictDoNothing();
+  return sent;
+}
+
+export async function sendDiscordDirectMessageWithFile({
+  discordUserId,
+  content,
+  filename,
+  file,
+  contentType = "text/markdown",
+}: {
+  discordUserId: string;
+  content: string;
+  filename: string;
+  file: Buffer;
+  contentType?: string;
+}) {
+  const message = content.trim().slice(0, 2_000);
+  const safeFilename =
+    filename
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+      .replace(/\s+/g, "-")
+      .slice(0, 180) || "210-robotics-debrief.md";
+  if (!/^\d{15,22}$/.test(discordUserId)) {
+    throw new Error("A valid Discord user ID is required.");
+  }
+  if (!message) throw new Error("A direct message cannot be empty.");
+  if (!file.byteLength) throw new Error("The debrief file is empty.");
+  if (file.byteLength > 8 * 1024 * 1024) {
+    throw new Error("The generated debrief is larger than Discord's upload limit.");
+  }
+  const channel = await discordFetch<{ id: string }>("/users/@me/channels", {
+    method: "POST",
+    body: JSON.stringify({ recipient_id: discordUserId }),
+  });
+  const formData = new FormData();
+  formData.set(
+    "payload_json",
+    JSON.stringify({
+      content: message,
+      allowed_mentions: { parse: [] },
+      attachments: [{ id: 0, filename: safeFilename }],
+    }),
+  );
+  formData.set(
+    "files[0]",
+    new Blob([new Uint8Array(file)], { type: contentType }),
+    safeFilename,
+  );
+  const sent = await discordFetch<{ id: string; timestamp: string }>(
+    `/channels/${channel.id}/messages`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+  const [knownMember] = await getDb()
+    .select({
+      username: discordGuildMembers.username,
+      displayName: discordGuildMembers.displayName,
+    })
+    .from(discordGuildMembers)
+    .where(eq(discordGuildMembers.discordUserId, discordUserId))
+    .limit(1);
+  await getDb()
+    .insert(discordDirectMessages)
+    .values({
+      id: sent.id,
+      channelId: channel.id,
+      discordUserId,
+      username: knownMember?.username || discordUserId,
+      displayName:
+        knownMember?.displayName || knownMember?.username || discordUserId,
+      direction: "OUTBOUND",
+      content: message,
+      aiGenerated: false,
+      metadata: {
+        attachmentFilename: safeFilename,
+        attachmentContentType: contentType,
+        attachmentBytes: file.byteLength,
+      },
+      discordCreatedAt: new Date(sent.timestamp),
+    })
+    .onConflictDoNothing();
+  return sent;
 }
 
 export async function setDiscordGuildMemberTimeout({

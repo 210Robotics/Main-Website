@@ -2210,6 +2210,48 @@ export const discordMessages = pgTable(
   ],
 );
 
+export const discordDirectMessages = pgTable(
+  "discord_direct_messages",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id").notNull(),
+    discordUserId: text("discord_user_id").notNull(),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    direction: text("direction").notNull().default("INBOUND"),
+    content: text("content").notNull().default(""),
+    attachments: jsonb("attachments")
+      .$type<DiscordMessageAttachment[]>()
+      .notNull()
+      .default([]),
+    aiGenerated: boolean("ai_generated").notNull().default(false),
+    replyToMessageId: text("reply_to_message_id"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    discordCreatedAt: timestamp("discord_created_at", {
+      withTimezone: true,
+    }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("discord_dm_user_date_idx").on(
+      table.discordUserId,
+      table.discordCreatedAt,
+    ),
+    index("discord_dm_direction_date_idx").on(
+      table.direction,
+      table.discordCreatedAt,
+    ),
+  ],
+);
+
 export const discordCalendarReminders = pgTable(
   "discord_calendar_reminders",
   {

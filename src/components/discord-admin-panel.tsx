@@ -13,6 +13,7 @@ import { getDb } from "@/db";
 import {
   discordCalendarReminders,
   discordChannels,
+  discordDirectMessages,
   discordEvents,
   discordGuildMembers,
   discordGuilds,
@@ -41,6 +42,7 @@ import { DiscordMessageComposer } from "@/components/discord-message-composer";
 import { DiscordMemberDmComposer } from "@/components/discord-member-dm-composer";
 import { DiscordMeetingTranscription } from "@/components/discord-meeting-transcription";
 import { DiscordBrowserRecorder } from "@/components/discord-browser-recorder";
+import { DiscordOrganizationDebrief } from "@/components/discord-organization-debrief";
 import { DiscordSectionMenu } from "@/components/discord-section-menu";
 import { DiscordVoiceSpeaker } from "@/components/discord-voice-speaker";
 import { requirePermission } from "@/lib/auth";
@@ -96,6 +98,7 @@ export async function DiscordAdminPanel({
     websiteMembers,
     channelRows,
     messageRows,
+    directMessageRows,
     messageCount,
     topAuthors,
     topChannels,
@@ -161,6 +164,11 @@ export async function DiscordAdminPanel({
           .orderBy(desc(discordMessages.discordCreatedAt))
           .limit(250)
       : Promise.resolve([]),
+    getDb()
+      .select()
+      .from(discordDirectMessages)
+      .orderBy(desc(discordDirectMessages.discordCreatedAt))
+      .limit(300),
     guild
       ? getDb()
           .select({ value: count() })
@@ -234,6 +242,33 @@ export async function DiscordAdminPanel({
   const websiteOnlyMembers = websiteMembers.filter(
     (member) => !linkedWebsiteMemberIds.has(member.id),
   );
+  const directMessageConversationMap = new Map<
+    string,
+    {
+      discordUserId: string;
+      displayName: string;
+      username: string;
+      messages: typeof directMessageRows;
+    }
+  >();
+  for (const message of directMessageRows) {
+    const conversation = directMessageConversationMap.get(
+      message.discordUserId,
+    ) || {
+      discordUserId: message.discordUserId,
+      displayName: message.displayName,
+      username: message.username,
+      messages: [],
+    };
+    conversation.messages.push(message);
+    directMessageConversationMap.set(message.discordUserId, conversation);
+  }
+  const directMessageConversations = [
+    ...directMessageConversationMap.values(),
+  ].map((conversation) => ({
+    ...conversation,
+    messages: conversation.messages.reverse(),
+  }));
   const commandUses = recentEvents.filter(
     (event) => event.kind === "COMMAND_USED",
   ).length;
@@ -393,10 +428,10 @@ export async function DiscordAdminPanel({
         To log message text, enable Discord&apos;s{" "}
         <strong className="text-blue-100">Message Content Intent</strong> and
         give the bot View Channel + Read Message History access. Private DMs
-        are not copied; only channels visible to the bot are synchronized.
-        After a new human-authored message is successfully logged, the bot can
-        add the automatic reaction selected below. The bot also needs Add
-        Reactions access.
+        are securely copied into the private admin inbox below and answered by
+        the configured Gemini workflow. After a new human-authored server
+        message is successfully logged, the bot can add the automatic reaction
+        selected below. The bot also needs Add Reactions access.
       </div>
       {guild && (
         <ActionForm
@@ -934,7 +969,136 @@ export async function DiscordAdminPanel({
         </div>
       )}
 
+      <div
+        className="mt-8 scroll-mt-28 border border-[#343434] bg-[#0d0d0d] p-5 sm:p-6"
+        id="discord-private-dms"
+      >
+        <p className="text-xs font-bold uppercase tracking-[.12em] text-[#fd7803]">
+          Gemini private-DM inbox
+        </p>
+        <h3 className="mt-3 text-xl font-bold sm:text-2xl">
+          Bot conversations with members
+        </h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
+          Every private message sent to the bot is logged here. Gemini receives
+          the recent conversation context and answers in the same Discord DM.
+          Private organizational data and administrative actions stay in the
+          portal.
+        </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <Metric
+            value={directMessageConversations.length}
+            label="Private conversations"
+          />
+          <Metric
+            value={
+              directMessageRows.filter(
+                (message) => message.direction === "INBOUND",
+              ).length
+            }
+            label="Member messages"
+          />
+          <Metric
+            value={
+              directMessageRows.filter((message) => message.aiGenerated).length
+            }
+            label="Gemini replies"
+          />
+        </div>
+        <div className="mt-5 grid gap-3">
+          {directMessageConversations.map((conversation, index) => {
+            const latest =
+              conversation.messages[conversation.messages.length - 1];
+            return (
+              <details
+                className="min-w-0 border border-[#343434] bg-[#101010]"
+                key={conversation.discordUserId}
+                open={index === 0}
+              >
+                <summary className="cursor-pointer p-4 sm:p-5">
+                  <span className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="min-w-0">
+                      <strong className="block truncate text-white">
+                        {conversation.displayName}
+                      </strong>
+                      <span className="block truncate text-xs text-[#777]">
+                        @{conversation.username} ·{" "}
+                        {conversation.messages.length} message
+                        {conversation.messages.length === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                    <span className="text-xs text-[#777]">
+                      {latest
+                        ? formatDate(latest.discordCreatedAt)
+                        : "No messages"}
+                    </span>
+                  </span>
+                </summary>
+                <div className="grid gap-3 border-t border-[#303030] p-4 sm:p-5">
+                  {conversation.messages.map((message) => (
+                    <article
+                      className={`max-w-[92%] border p-3 sm:max-w-[78%] ${
+                        message.direction === "INBOUND"
+                          ? "justify-self-start border-[#444] bg-[#171717]"
+                          : "justify-self-end border-[#7b3d0a] bg-[#2a1607]"
+                      }`}
+                      key={message.id}
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-[.08em] text-[#888]">
+                        <span>
+                          {message.direction === "INBOUND"
+                            ? conversation.displayName
+                            : "210 Robotics bot"}
+                        </span>
+                        {message.aiGenerated && (
+                          <span className="border border-violet-700 px-1.5 py-0.5 text-violet-300">
+                            Gemini
+                          </span>
+                        )}
+                        <span>{formatDate(message.discordCreatedAt)}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[#ddd]">
+                        {message.content || "[Attachment only]"}
+                      </p>
+                      {message.attachments.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {message.attachments.map((attachment) => (
+                            <a
+                              className="tag max-w-full truncate text-[#fd7803] underline"
+                              href={attachment.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              key={attachment.id}
+                            >
+                              {attachment.filename}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </details>
+            );
+          })}
+          {!directMessageConversations.length && (
+            <p className="border border-dashed border-[#3a3a3a] p-5 text-sm leading-6 text-[#777]">
+              No private bot conversations have been logged yet. This inbox
+              will populate after a member sends the bot a Discord DM.
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className="mt-8 scroll-mt-28" id="discord-member-dms">
+        {guild && (
+          <div className="mb-7">
+            <DiscordOrganizationDebrief
+              guildId={guild.id}
+              configured={Boolean(configuration.botToken)}
+            />
+          </div>
+        )}
         {guild && (
           <DiscordMemberDmComposer
             guildId={guild.id}

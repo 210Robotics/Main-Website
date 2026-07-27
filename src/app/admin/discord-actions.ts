@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, ilike, inArray, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -20,6 +20,7 @@ import {
   registerDiscordCommands,
   sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
+  sendDiscordDirectMessageWithFile,
   sendDiscordMemberBroadcast,
   sendDiscordSelectedMemberMessages,
   sendDiscordMonthlyCalendarDigest,
@@ -31,6 +32,7 @@ import {
   syncDiscordMessages,
   upsertDiscordGuild,
 } from "@/lib/discord";
+import { buildOrganizationDebrief } from "@/lib/organization-debrief";
 import {
   membershipDuesStatus,
   membershipDuesStatuses,
@@ -921,6 +923,98 @@ export async function sendDiscordSelectedMemberDm(
         error instanceof Error
           ? error.message
           : "The selected member DMs could not be sent.",
+    };
+  }
+}
+
+export async function sendOrganizationDebriefToJacob(
+  _previousState: DiscordMessageState,
+  formData: FormData,
+): Promise<DiscordMessageState> {
+  try {
+    const actor = await requirePermission("integrations.manage");
+    const guildId = required(formData, "guildId");
+    const [linkedJacob] = await getDb()
+      .select({
+        discordUserId: discordGuildMembers.discordUserId,
+        discordDisplayName: discordGuildMembers.displayName,
+        discordUsername: discordGuildMembers.username,
+        portalName: members.displayName,
+      })
+      .from(discordGuildMembers)
+      .leftJoin(members, eq(members.id, discordGuildMembers.linkedMemberId))
+      .where(
+        and(
+          eq(discordGuildMembers.guildId, guildId),
+          eq(discordGuildMembers.isBot, false),
+          isNull(discordGuildMembers.leftAt),
+          or(
+            ilike(members.displayName, "Jacob White"),
+            ilike(discordGuildMembers.displayName, "Jacob White"),
+            ilike(discordGuildMembers.username, "jacobw624"),
+          ),
+        ),
+      )
+      .limit(1);
+    const configuredRecipient = String(
+      process.env.DISCORD_ADMIN_USER_ID || "",
+    ).trim();
+    const discordUserId =
+      linkedJacob?.discordUserId ||
+      (/^\d{15,22}$/.test(configuredRecipient) ? configuredRecipient : "");
+    if (!discordUserId) {
+      return {
+        status: "error",
+        message:
+          "Jacob White's linked Discord account could not be found. Synchronize Discord and link @jacobw624 to Jacob's portal account first.",
+      };
+    }
+
+    const debrief = await buildOrganizationDebrief();
+    const filename = `210-robotics-full-debrief-${debrief.generatedAt
+      .toISOString()
+      .slice(0, 10)}.md`;
+    const sent = await sendDiscordDirectMessageWithFile({
+      discordUserId,
+      content: debrief.summaryMessage,
+      filename,
+      file: Buffer.from(debrief.markdown, "utf8"),
+    });
+    await getDb().insert(auditEvents).values({
+      actorMemberId: actor.id,
+      action: "DISCORD_ORGANIZATION_DEBRIEF_SENT",
+      entityType: "discord_guild",
+      entityId: guildId,
+      details: {
+        recipientDiscordUserId: discordUserId,
+        recipientName:
+          linkedJacob?.portalName ||
+          linkedJacob?.discordDisplayName ||
+          "Jacob White",
+        messageId: sent.id,
+        warningCount: debrief.warningCount,
+        openTaskCount: debrief.openTaskCount,
+        upcomingEventCount: debrief.upcomingEventCount,
+        documentCount: debrief.documentCount,
+        filename,
+      },
+    });
+    return {
+      status: "success",
+      message: `Full debrief sent privately to ${
+        linkedJacob?.portalName ||
+        linkedJacob?.discordDisplayName ||
+        "Jacob White"
+      }: ${debrief.warningCount} warnings, ${debrief.openTaskCount} open tasks, ${debrief.upcomingEventCount} upcoming events, and ${debrief.documentCount} internal documents reviewed.`,
+    };
+  } catch (error) {
+    console.error("Discord organization debrief failed", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "The organization debrief could not be generated or delivered.",
     };
   }
 }
