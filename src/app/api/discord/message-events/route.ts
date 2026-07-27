@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import {
   discordChannels,
   discordGuildMembers,
+  discordGuilds,
   discordMessages,
 } from "@/db/schema";
 import {
@@ -151,7 +152,22 @@ export async function POST(request: Request) {
           updatedAt: now,
         },
       });
-    return NextResponse.json({ logged: true, messageId: data.messageId });
+    const [reactionSettings] = await db
+      .select({
+        enabled: discordGuilds.messageReactionEnabled,
+        emoji: discordGuilds.messageReactionEmoji,
+      })
+      .from(discordGuilds)
+      .where(eq(discordGuilds.id, data.guildId))
+      .limit(1);
+    return NextResponse.json({
+      logged: true,
+      messageId: data.messageId,
+      reaction:
+        reactionSettings?.enabled && reactionSettings.emoji
+          ? reactionSettings.emoji
+          : null,
+    });
   } catch (error) {
     console.error("Discord realtime message log failed", {
       error: error instanceof Error ? error.message : String(error),

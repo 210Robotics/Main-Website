@@ -1,0 +1,2 @@
+ALTER TABLE "discord_guilds" ADD COLUMN "message_reaction_enabled" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "discord_guilds" ADD COLUMN "message_reaction_emoji" text DEFAULT '✅' NOT NULL;

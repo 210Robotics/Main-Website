@@ -5,6 +5,7 @@ import {
   and,
   desc,
   eq,
+  inArray,
   isNull,
   lt,
   notInArray,
@@ -100,12 +101,26 @@ function discordMessageIsNewer(
   return message.id > latest.id;
 }
 
-async function addDiscordVerifiedReaction(
+export function normalizeDiscordReactionEmoji(value: string) {
+  const emoji = value.trim();
+  if (
+    !emoji ||
+    emoji.length > 32 ||
+    /\s/.test(emoji) ||
+    /[\u0000-\u001f\u007f]/.test(emoji)
+  ) {
+    throw new Error("Choose one valid emoji without spaces.");
+  }
+  return emoji;
+}
+
+async function addDiscordMessageReaction(
   channelId: string,
   messageId: string,
+  emoji: string,
 ) {
   await discordFetch(
-    `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent("\u2705")}/@me`,
+    `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`,
     { method: "PUT" },
   );
 }
@@ -495,6 +510,9 @@ export async function syncDiscordMessages(requestedGuildId?: string) {
   let messagesVerified = 0;
   let verificationFailures = 0;
   let channelsRead = 0;
+  const reactionEmoji = guild.messageReactionEnabled
+    ? normalizeDiscordReactionEmoji(guild.messageReactionEmoji)
+    : null;
   for (const channel of readableChannels) {
     const [latest] = await getDb()
       .select({
@@ -528,10 +546,11 @@ export async function syncDiscordMessages(requestedGuildId?: string) {
         : page;
       const messagesToVerify = page.filter(
         (message) =>
+          reactionEmoji &&
           !message.author.bot &&
           !message.reactions?.some(
             (reaction) =>
-              reaction.me && reaction.emoji?.name === "\u2705",
+              reaction.me && reaction.emoji?.name === reactionEmoji,
           ),
       );
       const values = page.map((message) => {
@@ -589,7 +608,11 @@ export async function syncDiscordMessages(requestedGuildId?: string) {
       messagesSaved += newMessages.length;
       for (const message of messagesToVerify) {
         try {
-          await addDiscordVerifiedReaction(channel.id, message.id);
+          await addDiscordMessageReaction(
+            channel.id,
+            message.id,
+            reactionEmoji!,
+          );
           messagesVerified += 1;
         } catch (error) {
           verificationFailures += 1;
@@ -797,13 +820,15 @@ export async function publishDiscordMeetingTranscript({
   title,
   transcript,
   recordingDocumentId,
-  transcriptDocumentId,
+  transcriptDocxDocumentId,
+  transcriptMarkdownDocumentId,
 }: {
   guildId?: string;
   title: string;
   transcript: string;
   recordingDocumentId?: string;
-  transcriptDocumentId?: string;
+  transcriptDocxDocumentId?: string;
+  transcriptMarkdownDocumentId?: string;
 }) {
   const guild = await configuredGuild(guildId);
   if (!guild) throw new Error("No Discord server is connected.");
@@ -832,8 +857,11 @@ export async function publishDiscordMeetingTranscript({
     recordingDocumentId
       ? `[Open audio recording](${siteUrl}/api/internal-documents/${recordingDocumentId}/file)`
       : "",
-    transcriptDocumentId
-      ? `[Open editable transcript document](${siteUrl}/api/internal-documents/${transcriptDocumentId}/file)`
+    transcriptDocxDocumentId
+      ? `[Download Word transcript](${siteUrl}/api/internal-documents/${transcriptDocxDocumentId}/file)`
+      : "",
+    transcriptMarkdownDocumentId
+      ? `[Download Markdown transcript](${siteUrl}/api/internal-documents/${transcriptMarkdownDocumentId}/file)`
       : "",
   ].filter(Boolean);
   const formData = new FormData();
@@ -842,7 +870,7 @@ export async function publishDiscordMeetingTranscript({
     JSON.stringify({
       content:
         `**Meeting transcript archived: ${safeTitle}**\n` +
-        "The consent-confirmed recording and editable transcript are stored in Internal Documents." +
+        "The consent-confirmed recording and speaker-attributed Word and Markdown transcripts are stored in Internal Documents." +
         (documentLinks.length ? `\n${documentLinks.join(" · ")}` : ""),
       allowed_mentions: { parse: [] },
     }),
@@ -1165,14 +1193,28 @@ export async function sendDiscordChannelMessage({
       },
     });
   let verified = false;
-  try {
-    await addDiscordVerifiedReaction(channelId, message.id);
-    verified = true;
-  } catch (error) {
-    console.error(
-      `Discord verification reaction failed for sent message ${message.id}`,
-      error,
-    );
+  const [guildSettings] = await getDb()
+    .select({
+      enabled: discordGuilds.messageReactionEnabled,
+      emoji: discordGuilds.messageReactionEmoji,
+    })
+    .from(discordGuilds)
+    .where(eq(discordGuilds.id, guildId))
+    .limit(1);
+  if (guildSettings?.enabled) {
+    try {
+      await addDiscordMessageReaction(
+        channelId,
+        message.id,
+        normalizeDiscordReactionEmoji(guildSettings.emoji),
+      );
+      verified = true;
+    } catch (error) {
+      console.error(
+        `Discord automatic reaction failed for sent message ${message.id}`,
+        error,
+      );
+    }
   }
   await recordDiscordEvent({
     guildId,
@@ -1515,6 +1557,70 @@ export async function sendDiscordMemberBroadcast({
     guildId,
     kind: "MEMBER_DM_BROADCAST_COMPLETED",
     metadata: {
+      recipients: recipients.length,
+      sent,
+      failed: failures.length,
+      failures,
+    },
+  });
+  return {
+    recipients: recipients.length,
+    sent,
+    failed: failures.length,
+    failures,
+  };
+}
+
+export async function sendDiscordSelectedMemberMessages({
+  guildId,
+  guildMemberIds,
+  content,
+}: {
+  guildId: string;
+  guildMemberIds: string[];
+  content: string;
+}) {
+  const message = content.trim().slice(0, 1_800);
+  const recipientIds = [...new Set(guildMemberIds)].slice(0, 100);
+  if (!message) throw new Error("Enter a private message.");
+  if (!recipientIds.length) throw new Error("Select at least one member.");
+  const recipients = await getDb()
+    .select({
+      id: discordGuildMembers.id,
+      discordUserId: discordGuildMembers.discordUserId,
+      displayName: discordGuildMembers.displayName,
+    })
+    .from(discordGuildMembers)
+    .where(
+      and(
+        eq(discordGuildMembers.guildId, guildId),
+        eq(discordGuildMembers.isBot, false),
+        isNull(discordGuildMembers.leftAt),
+        inArray(discordGuildMembers.id, recipientIds),
+      ),
+    )
+    .orderBy(discordGuildMembers.displayName);
+  let sent = 0;
+  const failures: Array<{ id: string; reason: string }> = [];
+  for (const recipient of recipients) {
+    try {
+      await sendDiscordDirectMessage({
+        discordUserId: recipient.discordUserId,
+        content: `Hi ${recipient.displayName}! ${message}`,
+      });
+      sent += 1;
+    } catch (error) {
+      failures.push({
+        id: recipient.id,
+        reason: error instanceof Error ? error.message : "Discord DM failed.",
+      });
+    }
+  }
+  await recordDiscordEvent({
+    guildId,
+    kind: "MEMBER_DM_SELECTION_COMPLETED",
+    metadata: {
+      requested: recipientIds.length,
       recipients: recipients.length,
       sent,
       failed: failures.length,

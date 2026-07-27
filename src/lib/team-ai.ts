@@ -31,6 +31,12 @@ export type GeminiMediaInput = {
   feature: string;
   mimeType: string;
   buffer: Buffer;
+  primaryMediaLabel?: string;
+  additionalMedia?: Array<{
+    label: string;
+    mimeType: string;
+    buffer: Buffer;
+  }>;
   maxOutputTokens?: number;
   timeoutMs?: number;
 };
@@ -211,6 +217,14 @@ export async function generateGeminiMediaText(input: GeminiMediaInput) {
   }
   const model = process.env.GEMINI_TEAM_MODEL || "gemini-flash-latest";
   const startedAt = Date.now();
+  const media = [
+    {
+      label: input.primaryMediaLabel || "Combined meeting recording",
+      mimeType: input.mimeType,
+      buffer: input.buffer,
+    },
+    ...(input.additionalMedia || []),
+  ];
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
@@ -228,12 +242,19 @@ export async function generateGeminiMediaText(input: GeminiMediaInput) {
             role: "user",
             parts: [
               { text: input.prompt },
-              {
-                inlineData: {
-                  mimeType: input.mimeType,
-                  data: input.buffer.toString("base64"),
+              ...media.flatMap((item) => [
+                {
+                  text:
+                    `\nAudio source: ${item.label}. ` +
+                    "Use this exact source label when identifying its speaker.",
                 },
-              },
+                {
+                  inlineData: {
+                    mimeType: item.mimeType,
+                    data: item.buffer.toString("base64"),
+                  },
+                },
+              ]),
             ],
           },
         ],
@@ -264,7 +285,11 @@ export async function generateGeminiMediaText(input: GeminiMediaInput) {
   }, {
     durationMs: Date.now() - startedAt,
     model,
-    inputBytes: input.buffer.byteLength,
+    inputBytes: media.reduce(
+      (total, item) => total + item.buffer.byteLength,
+      0,
+    ),
+    mediaParts: media.length,
     outputLength: text.length,
   });
   if (!text) throw new Error("Gemini returned an empty transcript.");

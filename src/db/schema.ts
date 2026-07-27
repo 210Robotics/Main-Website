@@ -2014,6 +2014,12 @@ export const discordGuilds = pgTable("discord_guilds", {
   calendarReminderHours: integer("calendar_reminder_hours")
     .notNull()
     .default(24),
+  messageReactionEnabled: boolean("message_reaction_enabled")
+    .notNull()
+    .default(true),
+  messageReactionEmoji: text("message_reaction_emoji")
+    .notNull()
+    .default("✅"),
   installedByDiscordUserId: text("installed_by_discord_user_id"),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })

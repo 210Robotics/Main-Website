@@ -8,6 +8,7 @@ import {
   allowedMeetingRecordingTypes,
   MAX_MEETING_RECORDING_BYTES,
   transcribeAndArchiveMeeting,
+  type MeetingSpeakerTrack,
 } from "@/lib/meeting-transcription";
 import { privateBlobToken } from "@/lib/private-blob";
 
@@ -54,6 +55,11 @@ export async function POST(request: Request) {
     const guildId = text(formData, "guildId", 30);
     const channelId = text(formData, "channelId", 30);
     const title = text(formData, "title", 180);
+    const speakerManifestText = text(
+      formData,
+      "speakerManifest",
+      24_000,
+    );
     const audio = formData.get("audio");
     if (
       !memberId ||
@@ -102,6 +108,17 @@ export async function POST(request: Request) {
       contentType: audio.type,
       addRandomSuffix: true,
     });
+    let speakerTracks: MeetingSpeakerTrack[] = [];
+    if (speakerManifestText) {
+      const parsed = JSON.parse(speakerManifestText) as unknown;
+      if (!Array.isArray(parsed)) {
+        return NextResponse.json(
+          { error: "The speaker-track manifest is invalid." },
+          { status: 400 },
+        );
+      }
+      speakerTracks = parsed as MeetingSpeakerTrack[];
+    }
     const result = await transcribeAndArchiveMeeting({
       memberId: member.id,
       guildId,
@@ -110,6 +127,7 @@ export async function POST(request: Request) {
       filename: filename || "discord-voice-recording.mp3",
       mimeType: audio.type,
       bytes: audio.size,
+      speakerTracks,
     });
     const siteUrl = (
       process.env.NEXT_PUBLIC_SITE_URL || "https://210robotics.com"
@@ -118,8 +136,10 @@ export async function POST(request: Request) {
       ok: true,
       recordingDocumentId: result.recordingId,
       transcriptDocumentId: result.transcriptId,
+      transcriptMarkdownDocumentId: result.transcriptMarkdownId,
       recordingUrl: `${siteUrl}/api/internal-documents/${result.recordingId}/file`,
       transcriptUrl: `${siteUrl}/api/internal-documents/${result.transcriptId}/file`,
+      transcriptMarkdownUrl: `${siteUrl}/api/internal-documents/${result.transcriptMarkdownId}/file`,
       botlogPublished: result.botlog.published,
       driveSynced: result.driveSynced,
     });

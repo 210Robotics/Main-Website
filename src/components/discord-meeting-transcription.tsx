@@ -107,10 +107,11 @@ export function DiscordMeetingTranscription({
           </div>
         </div>
         <p className="mt-4 max-w-2xl text-sm leading-7 text-[#999]">
-          Upload a recording after the meeting. Gemini creates an editable
-          transcript with decisions and action items, saves both files in the
-          private archive, syncs the meeting Drive folder when configured, and
-          posts the transcript file to #Botlog.
+          Upload a recording after the meeting. Gemini identifies
+          distinguishable speakers, creates editable Word and Markdown
+          transcripts with decisions and action items, syncs both formats to
+          the private archive and meeting Drive folder, and posts the Markdown
+          transcript with download links in #Botlog.
         </p>
         <p className="mt-3 border-l-2 border-amber-500 pl-3 text-xs leading-6 text-amber-100/75">
           This tool never joins voice channels or records people

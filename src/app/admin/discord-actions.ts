@@ -16,10 +16,12 @@ import { requirePermission } from "@/lib/auth";
 import {
   discordConfiguration,
   listDiscordVoiceChannels,
+  normalizeDiscordReactionEmoji,
   registerDiscordCommands,
   sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
   sendDiscordMemberBroadcast,
+  sendDiscordSelectedMemberMessages,
   sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminder,
   sendDiscordRegistrationReminders,
@@ -348,9 +350,9 @@ export async function transcribeMeetingRecording(
     return {
       status: "success",
       message:
-        `Transcript created and recording archived${result.driveSynced ? " in Google Drive" : " in Internal Documents"}. ` +
+        `Word and Markdown transcripts created and the recording archived${result.driveSynced ? " in Google Drive" : " in Internal Documents"}. ` +
         (result.botlog.published
-          ? "The transcript was also posted in #Botlog."
+          ? "The Markdown transcript and download links were also posted in #Botlog."
           : `Botlog was not updated: ${result.botlog.reason}`),
       transcriptId: result.transcriptId,
     };
@@ -482,6 +484,31 @@ export async function saveDiscordSettings(formData: FormData) {
       reminderHours,
       enabled,
     },
+  });
+  revalidatePath("/admin");
+}
+
+export async function saveDiscordReactionSettings(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const enabled = formData.get("reactionEnabled") === "on";
+  const emoji = normalizeDiscordReactionEmoji(
+    String(formData.get("reactionEmoji") || "✅"),
+  );
+  await getDb()
+    .update(discordGuilds)
+    .set({
+      messageReactionEnabled: enabled,
+      messageReactionEmoji: emoji,
+      updatedAt: new Date(),
+    })
+    .where(eq(discordGuilds.id, guildId));
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_MESSAGE_REACTION_SETTINGS",
+    entityType: "discord_guild",
+    entityId: guildId,
+    details: { enabled, emoji },
   });
   revalidatePath("/admin");
 }
@@ -839,7 +866,10 @@ export async function stopAllDiscordRecordings(
 export async function sendDiscordReminder(formData: FormData) {
   const actor = await requirePermission("integrations.manage");
   const guildMemberId = required(formData, "guildMemberId");
-  await sendDiscordRegistrationReminder({ guildMemberId });
+  await sendDiscordRegistrationReminder({
+    guildMemberId,
+    ignoreCooldown: true,
+  });
   await getDb().insert(auditEvents).values({
     actorMemberId: actor.id,
     action: "DISCORD_REGISTRATION_REMINDER",
@@ -847,6 +877,52 @@ export async function sendDiscordReminder(formData: FormData) {
     entityId: guildMemberId,
   });
   revalidatePath("/admin");
+}
+
+export async function sendDiscordSelectedMemberDm(
+  _previousState: DiscordMessageState,
+  formData: FormData,
+): Promise<DiscordMessageState> {
+  try {
+    const actor = await requirePermission("integrations.manage");
+    const guildId = required(formData, "guildId");
+    const guildMemberIds = formData
+      .getAll("guildMemberIds")
+      .map((value) => String(value))
+      .filter((value) => z.uuid().safeParse(value).success);
+    const message = required(formData, "message").slice(0, 1_800);
+    const result = await sendDiscordSelectedMemberMessages({
+      guildId,
+      guildMemberIds,
+      content: message,
+    });
+    await getDb().insert(auditEvents).values({
+      actorMemberId: actor.id,
+      action: "DISCORD_MEMBER_DM_SELECTION",
+      entityType: "discord_guild",
+      entityId: guildId,
+      details: {
+        selected: guildMemberIds.length,
+        sent: result.sent,
+        failed: result.failed,
+      },
+    });
+    return {
+      status: result.failed ? "error" : "success",
+      message: result.failed
+        ? `${result.sent} DM${result.sent === 1 ? "" : "s"} sent; ${result.failed} failed because Discord blocked delivery.`
+        : `${result.sent} private DM${result.sent === 1 ? "" : "s"} sent successfully.`,
+    };
+  } catch (error) {
+    console.error("Selected Discord member DM failed", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "The selected member DMs could not be sent.",
+    };
+  }
 }
 
 export async function sendAllDiscordReminders(formData: FormData) {

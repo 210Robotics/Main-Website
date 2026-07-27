@@ -35,6 +35,9 @@ const PORT = Number(process.env.PORT || 8787);
 const EMPTY_CHANNEL_GRACE_MS = 10_000;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_SPEECH_CHARACTERS = 500;
+const MAX_SPEAKER_TRACK_BYTES = 8 * 1024 * 1024;
+const MAX_SPEAKER_TRACK_TOTAL_BYTES = 14 * 1024 * 1024;
+const MAX_SPEAKER_TRACKS = 12;
 const RECORDING_NOTICE = "This channel is being recorded";
 
 type StartRequest = {
@@ -56,6 +59,20 @@ type AudioSegment = {
   path: string;
   startMs: number;
   userId: string;
+};
+
+type RenderedSpeakerTrack = {
+  path: string;
+  discordUserId: string;
+  displayName: string;
+};
+
+type UploadedSpeakerTrack = {
+  pathname: string;
+  discordUserId: string;
+  displayName: string;
+  mimeType: string;
+  bytes: number;
 };
 
 type RecordingSession = StartRequest & {
@@ -319,9 +336,127 @@ async function renderRecording(session: RecordingSession) {
   return output;
 }
 
+async function renderSpeakerTracks(session: RecordingSession) {
+  if (!ffmpegPath) throw new Error("FFmpeg is not available.");
+  const bySpeaker = new Map<string, AudioSegment[]>();
+  for (const segment of session.segments) {
+    const current = bySpeaker.get(segment.userId) || [];
+    current.push(segment);
+    bySpeaker.set(segment.userId, current);
+  }
+  const tracks: RenderedSpeakerTrack[] = [];
+  for (const [discordUserId, segments] of bySpeaker) {
+    const output = join(
+      session.tempDirectory,
+      `speaker-${discordUserId}.mp3`,
+    );
+    const args: string[] = [];
+    for (const segment of segments) {
+      args.push(
+        "-f",
+        "s16le",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-i",
+        segment.path,
+      );
+    }
+    const filters = segments.map(
+      (segment, index) =>
+        `[${index}:a]adelay=${segment.startMs}|${segment.startMs}[speaker${index}]`,
+    );
+    const labels = segments
+      .map((_, index) => `[speaker${index}]`)
+      .join("");
+    filters.push(
+      `${labels}amix=inputs=${segments.length}:normalize=0:dropout_transition=0[speaker]`,
+    );
+    args.push(
+      "-filter_complex",
+      filters.join(";"),
+      "-map",
+      "[speaker]",
+      "-ac",
+      "1",
+      "-codec:a",
+      "libmp3lame",
+      "-b:a",
+      "24k",
+      "-y",
+      output,
+    );
+    await runProcess(ffmpegPath, args);
+    const member = session.channel.guild.members.cache.get(discordUserId);
+    tracks.push({
+      path: output,
+      discordUserId,
+      displayName:
+        member?.displayName ||
+        member?.user.globalName ||
+        member?.user.username ||
+        `Discord member ${discordUserId}`,
+    });
+  }
+  return tracks;
+}
+
+async function uploadSpeakerTrack(
+  session: RecordingSession,
+  track: RenderedSpeakerTrack,
+) {
+  const siteUrl = (
+    process.env.SITE_URL || "https://210robotics.com"
+  ).replace(/\/$/, "");
+  const secret = process.env.DISCORD_VOICE_WORKER_SECRET;
+  if (!secret) throw new Error("DISCORD_VOICE_WORKER_SECRET is missing.");
+  const audio = await readFile(track.path);
+  const formData = new FormData();
+  formData.set("sessionId", session.id);
+  formData.set("guildId", session.guildId);
+  formData.set("discordUserId", track.discordUserId);
+  formData.set("displayName", track.displayName);
+  formData.set(
+    "audio",
+    new Blob([audio], { type: "audio/mpeg" }),
+    `${track.discordUserId}.mp3`,
+  );
+  const response = await fetch(
+    `${siteUrl}/api/discord/voice-speaker-tracks`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${secret}` },
+      body: formData,
+      signal: AbortSignal.timeout(180_000),
+    },
+  );
+  const payload = (await response.json().catch(() => ({}))) as {
+    pathname?: string;
+    discordUserId?: string;
+    displayName?: string;
+    mimeType?: string;
+    bytes?: number;
+    error?: string;
+  };
+  if (!response.ok || !payload.pathname) {
+    throw new Error(
+      payload.error || `Speaker-track upload returned ${response.status}.`,
+    );
+  }
+  return {
+    pathname: payload.pathname,
+    discordUserId: payload.discordUserId || track.discordUserId,
+    displayName: payload.displayName || track.displayName,
+    mimeType: payload.mimeType || "audio/mpeg",
+    bytes: payload.bytes || audio.byteLength,
+  } satisfies UploadedSpeakerTrack;
+}
+
 async function uploadCompletedSession(
   session: RecordingSession,
   audioPath: string,
+  speakerTracks: UploadedSpeakerTrack[],
 ) {
   const siteUrl = (
     process.env.SITE_URL || "https://210robotics.com"
@@ -336,6 +471,7 @@ async function uploadCompletedSession(
   formData.set("title", session.title);
   formData.set("startedAt", new Date(session.startedAt).toISOString());
   formData.set("endedAt", new Date().toISOString());
+  formData.set("speakerManifest", JSON.stringify(speakerTracks));
   formData.set(
     "audio",
     new Blob([audio], { type: "audio/mpeg" }),
@@ -354,6 +490,7 @@ async function uploadCompletedSession(
     error?: string;
     recordingUrl?: string;
     transcriptUrl?: string;
+    transcriptMarkdownUrl?: string;
   };
   if (!response.ok) {
     throw new Error(
@@ -374,7 +511,48 @@ async function finishSession(session: RecordingSession, reason: string) {
   await Promise.allSettled([...session.pendingSegments]);
   try {
     const audioPath = await renderRecording(session);
-    const archived = await uploadCompletedSession(session, audioPath);
+    const renderedSpeakerTracks = await renderSpeakerTracks(session);
+    const eligibleSpeakerTracks: RenderedSpeakerTrack[] = [];
+    let eligibleSpeakerBytes = 0;
+    for (const track of renderedSpeakerTracks) {
+      const details = await stat(track.path);
+      if (
+        details.size <= MAX_SPEAKER_TRACK_BYTES &&
+        eligibleSpeakerBytes + details.size <=
+          MAX_SPEAKER_TRACK_TOTAL_BYTES &&
+        eligibleSpeakerTracks.length < MAX_SPEAKER_TRACKS
+      ) {
+        eligibleSpeakerTracks.push(track);
+        eligibleSpeakerBytes += details.size;
+      }
+    }
+    const speakerTrackResults = await Promise.allSettled(
+      eligibleSpeakerTracks.map((track) =>
+        uploadSpeakerTrack(session, track),
+      ),
+    );
+    const speakerTracks = speakerTrackResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    for (const result of speakerTrackResults) {
+      if (result.status === "rejected") {
+        console.error(
+          JSON.stringify({
+            event: "discord.voice.speaker_track_upload_failed",
+            sessionId: session.id,
+            error:
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason),
+          }),
+        );
+      }
+    }
+    const archived = await uploadCompletedSession(
+      session,
+      audioPath,
+      speakerTracks,
+    );
     console.info(
       JSON.stringify({
         event: "discord.voice.session_archived",
@@ -384,6 +562,8 @@ async function finishSession(session: RecordingSession, reason: string) {
         reason,
         recordingUrl: archived.recordingUrl,
         transcriptUrl: archived.transcriptUrl,
+        transcriptMarkdownUrl: archived.transcriptMarkdownUrl,
+        speakerTracks: speakerTracks.length,
       }),
     );
   } catch (error) {
@@ -631,7 +811,12 @@ client.on("messageCreate", (message) => {
         `Website message log returned ${response.status}: ${detail}`,
       );
     }
-    await message.react("\u2705");
+    const result = (await response.json()) as {
+      reaction?: string | null;
+    };
+    if (result.reaction) {
+      await message.react(result.reaction);
+    }
   })().catch((error) => {
     console.error(
       JSON.stringify({
@@ -651,6 +836,8 @@ const server = createServer(async (request, response) => {
       ok: client.isReady(),
       activeRecordings: sessions.size,
       speechReady: true,
+      speakerAttributionReady: true,
+      dynamicReactionsReady: true,
     });
   }
   if (!authorized(request)) {

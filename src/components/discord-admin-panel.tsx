@@ -23,6 +23,7 @@ import {
   registerDiscordCommandsAction,
   postDiscordRecordingPolicy,
   saveDiscordSettings,
+  saveDiscordReactionSettings,
   sendAllDiscordReminders,
   sendCalendarRemindersNow,
   sendDiscordBroadcastReminder,
@@ -37,6 +38,7 @@ import {
 import { ActionForm } from "@/components/action-form";
 import { DiscordConnectForm } from "@/components/discord-connect-form";
 import { DiscordMessageComposer } from "@/components/discord-message-composer";
+import { DiscordMemberDmComposer } from "@/components/discord-member-dm-composer";
 import { DiscordMeetingTranscription } from "@/components/discord-meeting-transcription";
 import { DiscordBrowserRecorder } from "@/components/discord-browser-recorder";
 import { DiscordSectionMenu } from "@/components/discord-section-menu";
@@ -392,9 +394,48 @@ export async function DiscordAdminPanel({
         <strong className="text-blue-100">Message Content Intent</strong> and
         give the bot View Channel + Read Message History access. Private DMs
         are not copied; only channels visible to the bot are synchronized.
-        After a new human-authored message is successfully logged, the bot
-        adds a green check reaction. The bot also needs Add Reactions access.
+        After a new human-authored message is successfully logged, the bot can
+        add the automatic reaction selected below. The bot also needs Add
+        Reactions access.
       </div>
+      {guild && (
+        <ActionForm
+          action={saveDiscordReactionSettings}
+          successMessage="Automatic message reaction settings saved."
+          className="mt-4 grid gap-4 border border-[#343434] bg-[#0d0d0d] p-4 sm:p-5 md:grid-cols-[minmax(0,1fr)_minmax(12rem,.4fr)_auto]"
+        >
+          <input type="hidden" name="guildId" value={guild.id} />
+          <label className="flex items-start gap-3 text-sm leading-6 text-[#bbb]">
+            <input
+              className="mt-1.5"
+              type="checkbox"
+              name="reactionEnabled"
+              defaultChecked={guild.messageReactionEnabled}
+            />
+            <span>
+              <strong className="block text-white">
+                React after each message is logged
+              </strong>
+              Turn this off to remove the automatic reaction from future
+              messages.
+            </span>
+          </label>
+          <label className="field">
+            <span>Reaction emoji</span>
+            <input
+              className="input text-xl"
+              name="reactionEmoji"
+              defaultValue={guild.messageReactionEmoji}
+              maxLength={32}
+              aria-label="Automatic Discord reaction emoji"
+              required
+            />
+          </label>
+          <button className="button w-full justify-center md:self-end">
+            Save reaction
+          </button>
+        </ActionForm>
+      )}
 
       <div
         className="mt-7 scroll-mt-28 grid gap-5 xl:grid-cols-[1.2fr_.8fr]"
@@ -794,9 +835,11 @@ export async function DiscordAdminPanel({
                 <p className="mt-2 max-w-3xl text-sm leading-7 text-[#aaa]">
                   The slash command asks the always-on bot worker to join the
                   selected voice channel. After every member leaves, it mixes
-                  the received audio, sends it to Gemini, archives the audio
-                  and editable transcript, and posts both links in #Botlogs.
-                  Screen sharing is handled separately below.
+                  each member&apos;s isolated audio with their Discord display
+                  name, sends the labeled tracks to Gemini, archives the audio
+                  plus Word and Markdown transcripts, and posts all download
+                  links in #Botlogs. Screen sharing is handled separately
+                  below.
                 </p>
               </div>
               <span
@@ -893,6 +936,18 @@ export async function DiscordAdminPanel({
 
       <div className="mt-8 scroll-mt-28" id="discord-member-dms">
         {guild && (
+          <DiscordMemberDmComposer
+            guildId={guild.id}
+            configured={Boolean(configuration.botToken)}
+            recipients={discordMembers.map(({ discord }) => ({
+              id: discord.id,
+              displayName: discord.displayName,
+              username: discord.username,
+              linked: Boolean(discord.linkedMemberId),
+            }))}
+          />
+        )}
+        {guild && (
           <div className="mb-7 border border-[#343434] bg-[#0d0d0d] p-5 sm:p-6">
             <p className="eyebrow">Server-wide private reminder</p>
             <h3 className="mt-3 text-xl font-bold">
@@ -940,7 +995,8 @@ export async function DiscordAdminPanel({
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <span className="text-xs text-[#777]">
-              Registration reminders have a 14-day cooldown.
+              Bulk registration reminders have a 14-day cooldown. Individual
+              reminders can be resent immediately.
             </span>
             {guild && unlinked.length > 0 && (
               <ActionForm
@@ -1004,14 +1060,13 @@ export async function DiscordAdminPanel({
                       className="button secondary justify-center px-3 py-2 text-xs"
                       disabled={
                         !configuration.botToken ||
-                        recentlyReminded ||
                         discord.remindersOptedOut
                       }
                     >
                       {discord.remindersOptedOut
                         ? "DMs paused"
                         : recentlyReminded
-                          ? "Recently reminded"
+                          ? "Resend link"
                           : "DM link account"}
                     </button>
                   </ActionForm>
