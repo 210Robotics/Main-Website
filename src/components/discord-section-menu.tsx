@@ -12,7 +12,7 @@ const sections = [
   },
   { id: "discord-moderation", label: "Timeout, mute & slowmode" },
   { id: "discord-channel-messages", label: "Channel messages" },
-  { id: "discord-private-dms", label: "Gemini private-DM inbox" },
+  { id: "discord-private-dms", label: "Gemini + manual bot inbox" },
   { id: "discord-member-dms", label: "Members & DM settings" },
   { id: "discord-message-log", label: "Message archive" },
 ];

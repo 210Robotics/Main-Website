@@ -23,6 +23,7 @@ import {
   registerDiscordCommands,
   sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
+  sendDiscordDirectMessage,
   sendDiscordDirectMessageWithFile,
   sendDiscordMemberBroadcast,
   sendDiscordSelectedMemberMessages,
@@ -1016,6 +1017,109 @@ export async function sendDiscordSelectedMemberDm(
         error instanceof Error
           ? error.message
           : "The selected member DMs could not be sent.",
+    };
+  }
+}
+
+export async function sendDiscordConversationReply(
+  _previousState: DiscordMessageState,
+  formData: FormData,
+): Promise<DiscordMessageState> {
+  try {
+    const actor = await requirePermission("integrations.manage");
+    const parsed = z
+      .object({
+        guildId: z.string().regex(/^\d{15,22}$/),
+        discordUserId: z.string().regex(/^\d{15,22}$/),
+        message: z.string().trim().min(1).max(1_800),
+        replyToMessageId: z
+          .string()
+          .regex(/^\d{15,22}$/)
+          .optional()
+          .or(z.literal("")),
+      })
+      .safeParse({
+        guildId: String(formData.get("guildId") || "").trim(),
+        discordUserId: String(formData.get("discordUserId") || "").trim(),
+        message: String(formData.get("message") || ""),
+        replyToMessageId: String(
+          formData.get("replyToMessageId") || "",
+        ).trim(),
+      });
+    if (!parsed.success) {
+      return {
+        status: "error",
+        message:
+          "Choose an active Discord member and enter a message under 1,800 characters.",
+      };
+    }
+
+    const [recipient] = await getDb()
+      .select({
+        discordUserId: discordGuildMembers.discordUserId,
+        username: discordGuildMembers.username,
+        displayName: discordGuildMembers.displayName,
+      })
+      .from(discordGuildMembers)
+      .where(
+        and(
+          eq(discordGuildMembers.guildId, parsed.data.guildId),
+          eq(
+            discordGuildMembers.discordUserId,
+            parsed.data.discordUserId,
+          ),
+          eq(discordGuildMembers.isBot, false),
+          isNull(discordGuildMembers.leftAt),
+        ),
+      )
+      .limit(1);
+    if (!recipient) {
+      return {
+        status: "error",
+        message:
+          "That person is no longer an active member of the connected Discord server. Synchronize Discord and try again.",
+      };
+    }
+
+    const sent = await sendDiscordDirectMessage({
+      discordUserId: recipient.discordUserId,
+      content: parsed.data.message,
+      log: {
+        username: recipient.username,
+        displayName: recipient.displayName,
+        aiGenerated: false,
+        replyToMessageId: parsed.data.replyToMessageId || null,
+        metadata: {
+          kind: "manual-admin-reply",
+          actorMemberId: actor.id,
+        },
+      },
+    });
+    await getDb().insert(auditEvents).values({
+      actorMemberId: actor.id,
+      action: "DISCORD_MANUAL_DM_SENT",
+      entityType: "discord_user",
+      entityId: recipient.discordUserId,
+      details: {
+        guildId: parsed.data.guildId,
+        discordMessageId: sent.id,
+        replyToMessageId: parsed.data.replyToMessageId || null,
+        characterCount: parsed.data.message.trim().length,
+      },
+    });
+    revalidatePath("/admin");
+    return {
+      status: "success",
+      message: `Sent privately to ${recipient.displayName} as the 210 Robotics bot.`,
+    };
+  } catch (error) {
+    console.error("Manual Discord conversation reply failed", error);
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "The private Discord message could not be sent.",
     };
   }
 }

@@ -41,6 +41,7 @@ import {
 } from "@/app/admin/discord-actions";
 import { ActionForm } from "@/components/action-form";
 import { DiscordConnectForm } from "@/components/discord-connect-form";
+import { DiscordDmReplyForm } from "@/components/discord-dm-reply-form";
 import { DiscordMessageComposer } from "@/components/discord-message-composer";
 import { DiscordMemberDmComposer } from "@/components/discord-member-dm-composer";
 import { DiscordMeetingTranscription } from "@/components/discord-meeting-transcription";
@@ -174,7 +175,7 @@ export async function DiscordAdminPanel({
       .select()
       .from(discordDirectMessages)
       .orderBy(desc(discordDirectMessages.discordCreatedAt))
-      .limit(300),
+      .limit(1_000),
     guild
       ? getDb()
           .select({ value: count() })
@@ -1161,18 +1162,18 @@ export async function DiscordAdminPanel({
         id="discord-private-dms"
       >
         <p className="text-xs font-bold uppercase tracking-[.12em] text-[#fd7803]">
-          Gemini private-DM inbox
+          Shared bot inbox
         </p>
         <h3 className="mt-3 text-xl font-bold sm:text-2xl">
-          Bot conversations with members
+          Continue private conversations as the 210 Bot
         </h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
           Every private message sent to the bot is logged here. Gemini receives
-          the recent conversation context and answers in the same Discord DM.
-          Private organizational data and administrative actions stay in the
-          portal.
+          the recent conversation context and can answer in the same Discord
+          DM. Admins can also read the shared history, reply personally as the
+          bot, or start a new conversation without leaving the portal.
         </p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Metric
             value={directMessageConversations.length}
             label="Private conversations"
@@ -1191,7 +1192,32 @@ export async function DiscordAdminPanel({
             }
             label="Gemini replies"
           />
+          <Metric
+            value={
+              directMessageRows.filter(
+                (message) =>
+                  message.direction === "OUTBOUND" && !message.aiGenerated,
+              ).length
+            }
+            label="Manual bot replies"
+          />
         </div>
+        {guild && (
+          <details className="mt-5 min-w-0 border border-[#6f3b11] bg-[#15100c]">
+            <summary className="cursor-pointer p-4 font-bold text-white sm:p-5">
+              Start a new private conversation
+            </summary>
+            <DiscordDmReplyForm
+              guildId={guild.id}
+              configured={Boolean(configuration.botToken)}
+              recipients={discordMembers.map(({ discord }) => ({
+                discordUserId: discord.discordUserId,
+                displayName: discord.displayName,
+                username: discord.username,
+              }))}
+            />
+          </details>
+        )}
         <div className="mt-5 grid gap-3">
           {directMessageConversations.map((conversation, index) => {
             const latest =
@@ -1235,7 +1261,9 @@ export async function DiscordAdminPanel({
                         <span>
                           {message.direction === "INBOUND"
                             ? conversation.displayName
-                            : "210 Robotics bot"}
+                            : message.aiGenerated
+                              ? "210 Robotics bot"
+                              : "210 Robotics bot · Manual"}
                         </span>
                         {message.aiGenerated && (
                           <span className="border border-violet-700 px-1.5 py-0.5 text-violet-300">
@@ -1265,13 +1293,26 @@ export async function DiscordAdminPanel({
                     </article>
                   ))}
                 </div>
+                {guild && (
+                  <DiscordDmReplyForm
+                    guildId={guild.id}
+                    recipient={{
+                      discordUserId: conversation.discordUserId,
+                      displayName: conversation.displayName,
+                      username: conversation.username,
+                    }}
+                    replyToMessageId={latest?.id}
+                    configured={Boolean(configuration.botToken)}
+                  />
+                )}
               </details>
             );
           })}
           {!directMessageConversations.length && (
             <p className="border border-dashed border-[#3a3a3a] p-5 text-sm leading-6 text-[#777]">
               No private bot conversations have been logged yet. This inbox
-              will populate after a member sends the bot a Discord DM.
+              will populate after a member sends the bot a Discord DM or an
+              admin starts a conversation above.
             </p>
           )}
         </div>
