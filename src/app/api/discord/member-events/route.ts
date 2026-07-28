@@ -26,8 +26,17 @@ export async function POST(request: Request) {
   if (!discordWorkerRequestIsAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const parsed = joinedMemberSchema.safeParse(
+    await request.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "The Discord join event payload is invalid." },
+      { status: 400 },
+    );
+  }
   try {
-    const data = joinedMemberSchema.parse(await request.json());
+    const data = parsed.data;
     const result = await handleDiscordMemberJoined({
       guildId: data.guildId,
       guildName: data.guildName,
