@@ -58,6 +58,7 @@ export const adminTabs = [
   "content",
   "docs",
   "documents",
+  "constitution",
   "sponsors",
   "media",
   "inquiries",
@@ -85,7 +86,8 @@ export function adminLoadPlan(tab: AdminTab) {
     projects: tab === "members",
     assignments: tab === "members",
     activity: tab === "activity" || tab === "members",
-    settings: tab === "website" || tab === "members",
+    settings:
+      tab === "website" || tab === "members" || tab === "constitution",
     roster: tab === "members",
     sponsors: tab === "sponsors",
     events: overview || tab === "events" || tab === "members",
@@ -97,7 +99,7 @@ export function adminLoadPlan(tab: AdminTab) {
     formResponses: overview || tab === "forms",
     polls: tab === "polls",
     pollResponses: tab === "polls",
-    documents: tab === "documents",
+    documents: tab === "documents" || tab === "constitution",
   };
 }
 

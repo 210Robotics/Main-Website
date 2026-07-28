@@ -6,8 +6,10 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
+  lte,
   notInArray,
   or,
   sql,
@@ -29,6 +31,10 @@ import {
   verifyDiscordSignature,
 } from "@/lib/discord-signature";
 import { discordApplicationCommands } from "@/lib/discord-commands";
+import {
+  inferDiscordOnboardingRoleIds,
+  type DiscordRoleOption,
+} from "@/lib/discord-role-selection";
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -62,6 +68,13 @@ type DiscordChannel = {
   parent_id?: string | null;
   position?: number;
   thread_metadata?: { archived?: boolean };
+};
+
+type DiscordRole = {
+  id: string;
+  name: string;
+  position: number;
+  managed: boolean;
 };
 
 type DiscordMessage = {
@@ -161,6 +174,23 @@ export async function checkDiscordGuildAccess(guildId: string) {
             : "Discord server access could not be verified.",
     };
   }
+}
+
+export async function listDiscordGuildRoles(
+  guildId: string,
+): Promise<DiscordRoleOption[]> {
+  if (!/^\d{15,22}$/.test(guildId)) {
+    throw new Error("A valid Discord server is required.");
+  }
+  const roles = await discordFetch<DiscordRole[]>(`/guilds/${guildId}/roles`);
+  return roles
+    .map((role) => ({
+      id: role.id,
+      name: role.name,
+      position: role.position,
+      managed: role.managed,
+    }))
+    .sort((a, b) => b.position - a.position || a.name.localeCompare(b.name));
 }
 
 async function discordFetch<T>(
@@ -1376,6 +1406,365 @@ export async function sendDiscordDirectMessageWithFile({
     })
     .onConflictDoNothing();
   return sent;
+}
+
+export async function assignDiscordOnboardingRoles({
+  guildId,
+  discordUserId,
+}: {
+  guildId: string;
+  discordUserId: string;
+}) {
+  const [[guild], [member]] = await Promise.all([
+    getDb()
+      .select()
+      .from(discordGuilds)
+      .where(eq(discordGuilds.id, guildId))
+      .limit(1),
+    getDb()
+      .select()
+      .from(discordGuildMembers)
+      .where(
+        and(
+          eq(discordGuildMembers.guildId, guildId),
+          eq(discordGuildMembers.discordUserId, discordUserId),
+        ),
+      )
+      .limit(1),
+  ]);
+  if (!guild || !member || member.leftAt || member.isBot) {
+    throw new Error("The Discord member is not active in the connected server.");
+  }
+  if (!member.linkedMemberId) {
+    throw new Error("The Discord account must be linked before roles are assigned.");
+  }
+  try {
+    const roles = await listDiscordGuildRoles(guildId);
+    const selected = inferDiscordOnboardingRoleIds(roles, {
+      agreedRoleId: guild.agreedRoleId,
+      vexUMemberRoleId: guild.vexUMemberRoleId,
+    });
+    if (!selected.agreedRoleId || !selected.vexUMemberRoleId) {
+      throw new Error(
+        "Choose the Agreed and VEX U Member roles in Discord onboarding settings.",
+      );
+    }
+    const roleIds = [
+      ...new Set([selected.agreedRoleId, selected.vexUMemberRoleId]),
+    ];
+    await Promise.all(
+      roleIds.map((roleId) =>
+        discordFetch(
+          `/guilds/${guildId}/members/${discordUserId}/roles/${roleId}`,
+          {
+            method: "PUT",
+            headers: {
+              "X-Audit-Log-Reason": encodeURIComponent(
+                "210 Robotics portal account linked",
+              ),
+            },
+          },
+        ),
+      ),
+    );
+    const now = new Date();
+    await Promise.all([
+      getDb()
+        .update(discordGuildMembers)
+        .set({
+          roles: [...new Set([...member.roles, ...roleIds])],
+          onboardingRolesAssignedAt: now,
+          onboardingRoleError: null,
+          updatedAt: now,
+        })
+        .where(eq(discordGuildMembers.id, member.id)),
+      getDb()
+        .update(discordGuilds)
+        .set({
+          agreedRoleId: selected.agreedRoleId,
+          vexUMemberRoleId: selected.vexUMemberRoleId,
+          updatedAt: now,
+        })
+        .where(eq(discordGuilds.id, guildId)),
+    ]);
+    await recordDiscordEvent({
+      guildId,
+      discordUserId,
+      kind: "ONBOARDING_ROLES_ASSIGNED",
+      metadata: { roleIds },
+    });
+    return {
+      assigned: true as const,
+      roleIds,
+      roleNames: roles
+        .filter((role) => roleIds.includes(role.id))
+        .map((role) => role.name),
+    };
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.slice(0, 500) : "Role assignment failed.";
+    await getDb()
+      .update(discordGuildMembers)
+      .set({ onboardingRoleError: detail, updatedAt: new Date() })
+      .where(eq(discordGuildMembers.id, member.id));
+    await recordDiscordEvent({
+      guildId,
+      discordUserId,
+      kind: "ONBOARDING_ROLE_ASSIGNMENT_FAILED",
+      metadata: { error: detail },
+    });
+    throw error;
+  }
+}
+
+export async function handleDiscordMemberJoined({
+  guildId,
+  guildName,
+  user,
+  displayName,
+  roles = [],
+  joinedAt,
+}: {
+  guildId: string;
+  guildName: string;
+  user: DiscordUser;
+  displayName?: string;
+  roles?: string[];
+  joinedAt?: string | null;
+}) {
+  await upsertDiscordGuild({ guildId, name: guildName });
+  const member = await upsertDiscordMember({
+    guildId,
+    user,
+    displayName,
+    roles,
+    joinedAt,
+  });
+  if (member.isBot) return { sent: false, reason: "bot" };
+  const [guild] = await getDb()
+    .select()
+    .from(discordGuilds)
+    .where(eq(discordGuilds.id, guildId))
+    .limit(1);
+  if (!guild?.onboardingEnabled) {
+    return { sent: false, reason: "onboarding-disabled" };
+  }
+  const now = new Date();
+  const delayMinutes = Math.max(
+    1,
+    Math.min(60, guild.securityDelayMinutes || 10),
+  );
+  const securityDelayEndsAt = new Date(
+    now.getTime() + delayMinutes * 60 * 1_000,
+  );
+  await getDb()
+    .update(discordGuildMembers)
+    .set({
+      onboardingDmSentAt: null,
+      securityDelayEndsAt,
+      securityDelayNotificationSentAt: null,
+      onboardingRolesAssignedAt: null,
+      onboardingRoleError: null,
+      updatedAt: now,
+    })
+    .where(eq(discordGuildMembers.id, member.id));
+  const registrationUrl = await createDiscordLinkToken({
+    guildId,
+    discordUserId: member.discordUserId,
+    username: member.username,
+  });
+  await sendDiscordDirectMessage({
+    discordUserId: member.discordUserId,
+    content:
+      `Welcome to 210 Robotics, ${member.displayName}!\n\n` +
+      `Discord's ${delayMinutes}-minute security delay is now running. While you wait, sign in or sign up for the 210 Robotics Portal and link this Discord account:\n${registrationUrl}\n\n` +
+      `After ${delayMinutes} minutes, I will notify you that the delay has passed. Once your account is linked, I will automatically add the Agreed and VEX U Member roles to unlock the server.\n\n` +
+      `This private link expires in 7 days.`,
+    log: {
+      username: member.username,
+      displayName: member.displayName,
+      metadata: {
+        kind: "join-onboarding",
+        securityDelayEndsAt: securityDelayEndsAt.toISOString(),
+      },
+    },
+  });
+  await getDb()
+    .update(discordGuildMembers)
+    .set({
+      onboardingDmSentAt: now,
+      registrationReminderSentAt: now,
+      registrationReminderCount:
+        sql`${discordGuildMembers.registrationReminderCount} + 1`,
+      updatedAt: now,
+    })
+    .where(eq(discordGuildMembers.id, member.id));
+  await recordDiscordEvent({
+    guildId,
+    discordUserId: member.discordUserId,
+    kind: "JOIN_ONBOARDING_DM_SENT",
+    metadata: {
+      securityDelayEndsAt: securityDelayEndsAt.toISOString(),
+      delayMinutes,
+    },
+  });
+  return { sent: true, securityDelayEndsAt, registrationUrl };
+}
+
+export async function processDiscordOnboarding({
+  guildId,
+  limit = 50,
+}: {
+  guildId?: string;
+  limit?: number;
+} = {}) {
+  const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+  const now = new Date();
+  const dueMembers = await getDb()
+    .select()
+    .from(discordGuildMembers)
+    .where(
+      and(
+        guildId ? eq(discordGuildMembers.guildId, guildId) : undefined,
+        eq(discordGuildMembers.isBot, false),
+        isNull(discordGuildMembers.leftAt),
+        isNotNull(discordGuildMembers.securityDelayEndsAt),
+        lte(discordGuildMembers.securityDelayEndsAt, now),
+        isNull(discordGuildMembers.securityDelayNotificationSentAt),
+      ),
+    )
+    .orderBy(discordGuildMembers.securityDelayEndsAt)
+    .limit(safeLimit);
+  let notified = 0;
+  let rolesAssigned = 0;
+  const failures: Array<{ id: string; reason: string }> = [];
+  for (const member of dueMembers) {
+    try {
+      let roleResult:
+        | Awaited<ReturnType<typeof assignDiscordOnboardingRoles>>
+        | null = null;
+      let roleError = "";
+      if (member.linkedMemberId && !member.onboardingRolesAssignedAt) {
+        try {
+          roleResult = await assignDiscordOnboardingRoles({
+            guildId: member.guildId,
+            discordUserId: member.discordUserId,
+          });
+          rolesAssigned += 1;
+        } catch (error) {
+          roleError =
+            error instanceof Error
+              ? error.message
+              : "Automatic role assignment needs officer review.";
+        }
+      }
+      const registrationUrl = member.linkedMemberId
+        ? null
+        : await createDiscordLinkToken({
+            guildId: member.guildId,
+            discordUserId: member.discordUserId,
+            username: member.username,
+          });
+      const content = member.linkedMemberId
+        ? roleError
+          ? `Hi ${member.displayName}! Your security delay has passed and your portal account is linked. Automatic role assignment needs officer review, so an officer can finish unlocking the server from the Discord admin page.`
+          : `Hi ${member.displayName}! Your security delay has passed. Your portal account is linked and the ${roleResult?.roleNames.join(" and ") || "Agreed and VEX U Member"} roles are ready, so the team server should now be unlocked.`
+        : `Hi ${member.displayName}! Your security delay has passed. Link your Discord account to the 210 Robotics Portal and I will automatically add the Agreed and VEX U Member roles to unlock the server:\n${registrationUrl}\n\nThis private link expires in 7 days.`;
+      await sendDiscordDirectMessage({
+        discordUserId: member.discordUserId,
+        content,
+        log: {
+          username: member.username,
+          displayName: member.displayName,
+          metadata: {
+            kind: "security-delay-complete",
+            rolesAssigned: Boolean(roleResult),
+          },
+        },
+      });
+      await getDb()
+        .update(discordGuildMembers)
+        .set({
+          securityDelayNotificationSentAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(discordGuildMembers.id, member.id));
+      await recordDiscordEvent({
+        guildId: member.guildId,
+        discordUserId: member.discordUserId,
+        kind: "SECURITY_DELAY_COMPLETE_DM_SENT",
+        metadata: {
+          linked: Boolean(member.linkedMemberId),
+          rolesAssigned: Boolean(roleResult),
+          roleError,
+        },
+      });
+      notified += 1;
+    } catch (error) {
+      failures.push({
+        id: member.id,
+        reason:
+          error instanceof Error ? error.message : "Discord onboarding failed.",
+      });
+    }
+  }
+  return {
+    due: dueMembers.length,
+    notified,
+    rolesAssigned,
+    failed: failures.length,
+    failures,
+  };
+}
+
+export async function completeDiscordLinkedOnboarding({
+  guildMemberId,
+}: {
+  guildMemberId: string;
+}) {
+  const [member] = await getDb()
+    .select()
+    .from(discordGuildMembers)
+    .where(eq(discordGuildMembers.id, guildMemberId))
+    .limit(1);
+  if (!member?.linkedMemberId || member.leftAt || member.isBot) {
+    return { assigned: false, reason: "not-eligible" };
+  }
+  if (
+    member.securityDelayEndsAt &&
+    member.securityDelayEndsAt.getTime() > Date.now()
+  ) {
+    return {
+      assigned: false,
+      reason: "security-delay",
+      securityDelayEndsAt: member.securityDelayEndsAt,
+    };
+  }
+  try {
+    const result = await assignDiscordOnboardingRoles({
+      guildId: member.guildId,
+      discordUserId: member.discordUserId,
+    });
+    await sendDiscordDirectMessage({
+      discordUserId: member.discordUserId,
+      content:
+        `Your 210 Robotics Portal account is linked and the ${result.roleNames.join(" and ")} roles were added automatically. The team server should now be unlocked.`,
+      log: {
+        username: member.username,
+        displayName: member.displayName,
+        metadata: { kind: "linked-roles-assigned" },
+      },
+    });
+    return { assigned: true, roleNames: result.roleNames };
+  } catch (error) {
+    return {
+      assigned: false,
+      reason:
+        error instanceof Error
+          ? error.message
+          : "Automatic role assignment needs officer review.",
+    };
+  }
 }
 
 export async function setDiscordGuildMemberTimeout({

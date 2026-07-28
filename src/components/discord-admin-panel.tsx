@@ -23,6 +23,9 @@ import {
 import {
   registerDiscordCommandsAction,
   postDiscordRecordingPolicy,
+  processDiscordOnboardingNow,
+  retryDiscordOnboardingRoles,
+  saveDiscordOnboardingSettings,
   saveDiscordSettings,
   saveDiscordReactionSettings,
   sendAllDiscordReminders,
@@ -49,8 +52,10 @@ import { requirePermission } from "@/lib/auth";
 import {
   checkDiscordGuildAccess,
   discordConfiguration,
+  listDiscordGuildRoles,
   listDiscordVoiceChannels,
 } from "@/lib/discord";
+import { inferDiscordOnboardingRoleIds } from "@/lib/discord-role-selection";
 import { discordVoiceWorkerConfiguration } from "@/lib/discord-voice-worker";
 
 function formatDate(value: Date | null) {
@@ -104,6 +109,7 @@ export async function DiscordAdminPanel({
     topChannels,
     reminderRows,
     liveVoiceChannels,
+    guildRoles,
   ] = await Promise.all([
     guild
       ? getDb()
@@ -229,6 +235,12 @@ export async function DiscordAdminPanel({
           return [];
         })
       : Promise.resolve([]),
+    guild
+      ? listDiscordGuildRoles(guild.id).catch((error: unknown) => {
+          console.error("Discord role refresh failed", error);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
   const linked = discordMembers.filter((row) => row.discord.linkedMemberId);
   const unlinked = discordMembers.filter(
@@ -304,6 +316,21 @@ export async function DiscordAdminPanel({
           name: channel.name,
           type: channel.type,
         }));
+  const onboardingRoles = inferDiscordOnboardingRoleIds(guildRoles, {
+    agreedRoleId: guild?.agreedRoleId,
+    vexUMemberRoleId: guild?.vexUMemberRoleId,
+  });
+  const selectableGuildRoles = guildRoles.filter(
+    (role) => !role.managed && role.name !== "@everyone",
+  );
+  const awaitingSecurityDelay = discordMembers.filter(
+    ({ discord }) =>
+      discord.securityDelayEndsAt &&
+      !discord.securityDelayNotificationSentAt,
+  ).length;
+  const onboardingRoleIssues = discordMembers.filter(
+    ({ discord }) => Boolean(discord.onboardingRoleError),
+  );
 
   return (
     <section className="card mt-7 min-w-0 p-5 sm:p-6 md:p-8">
@@ -597,6 +624,166 @@ export async function DiscordAdminPanel({
           </p>
         </div>
       </div>
+
+      {guild && (
+        <div
+          className="mt-7 scroll-mt-28 border border-[#343434] bg-[#0d0d0d] p-5 sm:p-6"
+          id="discord-onboarding"
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[.12em] text-[#fd7803]">
+                Join DM and automatic access
+              </p>
+              <h3 className="mt-3 text-xl font-bold">
+                Member onboarding
+              </h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
+                New members receive a private welcome and portal-link message
+                immediately. After the ten-minute security delay, the bot sends
+                an unlock notice and adds both selected roles as soon as their
+                Discord identity is linked.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <Status
+                label="Waiting for unlock"
+                value={String(awaitingSecurityDelay)}
+              />
+              <Status
+                label="Role issues"
+                value={String(onboardingRoleIssues.length)}
+              />
+            </div>
+          </div>
+          <ActionForm
+            action={saveDiscordOnboardingSettings}
+            successMessage="Discord onboarding settings saved."
+            className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem_auto]"
+          >
+            <input type="hidden" name="guildId" value={guild.id} />
+            <label className="field">
+              <span>Agreement role</span>
+              <select
+                className="input"
+                name="agreedRoleId"
+                defaultValue={onboardingRoles.agreedRoleId ?? ""}
+                required
+              >
+                <option value="" disabled>
+                  Select the Agreed role
+                </option>
+                {selectableGuildRoles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>VEX U member role</span>
+              <select
+                className="input"
+                name="vexUMemberRoleId"
+                defaultValue={onboardingRoles.vexUMemberRoleId ?? ""}
+                required
+              >
+                <option value="" disabled>
+                  Select the VEX U Member role
+                </option>
+                {selectableGuildRoles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Security delay</span>
+              <select
+                className="input"
+                name="securityDelayMinutes"
+                defaultValue={String(guild.securityDelayMinutes)}
+              >
+                <option value="5">5 minutes</option>
+                <option value="10">10 minutes</option>
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-3 text-sm text-[#bbb] xl:self-end xl:pb-3">
+              <input
+                type="checkbox"
+                name="onboardingEnabled"
+                defaultChecked={guild.onboardingEnabled}
+              />
+              Welcome DMs enabled
+            </label>
+            <button
+              className="button justify-center md:w-fit"
+              disabled={!selectableGuildRoles.length}
+            >
+              Save onboarding
+            </button>
+          </ActionForm>
+          {!selectableGuildRoles.length && (
+            <p className="mt-4 border border-amber-900/60 bg-amber-950/20 p-4 text-sm text-amber-100/75">
+              Discord roles could not be loaded. Confirm the bot has Manage
+              Roles and Server Members access, then refresh this page.
+            </p>
+          )}
+          <ActionForm
+            action={processDiscordOnboardingNow}
+            successMessage="Due onboarding notices and role assignments were checked."
+            className="mt-4"
+          >
+            <input type="hidden" name="guildId" value={guild.id} />
+            <button className="button secondary w-full justify-center sm:w-auto">
+              Check due unlocks now
+            </button>
+          </ActionForm>
+          {!!onboardingRoleIssues.length && (
+            <div className="mt-6 border-t border-[#303030] pt-5">
+              <h4 className="text-sm font-bold text-white">
+                Role assignment needs attention
+              </h4>
+              <div className="mt-3 grid gap-2">
+                {onboardingRoleIssues.slice(0, 20).map(({ discord }) => (
+                  <div
+                    className="flex flex-col gap-3 border border-[#2d2d2d] bg-black/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+                    key={discord.id}
+                  >
+                    <div className="min-w-0">
+                      <strong className="block truncate text-sm text-white">
+                        {discord.displayName}
+                      </strong>
+                      <span className="mt-1 block text-xs leading-5 text-[#888]">
+                        {discord.onboardingRoleError}
+                      </span>
+                    </div>
+                    {discord.linkedMemberId && (
+                      <ActionForm
+                        action={retryDiscordOnboardingRoles}
+                        successMessage={`Roles assigned to ${discord.displayName}.`}
+                      >
+                        <input type="hidden" name="guildId" value={guild.id} />
+                        <input
+                          type="hidden"
+                          name="discordUserId"
+                          value={discord.discordUserId}
+                        />
+                        <button className="button secondary w-full justify-center sm:w-auto">
+                          Retry roles
+                        </button>
+                      </ActionForm>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {guild && (
         <div

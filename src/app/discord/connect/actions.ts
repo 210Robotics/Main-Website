@@ -8,7 +8,11 @@ import {
   discordLinkTokens,
 } from "@/db/schema";
 import { getCurrentMember } from "@/lib/auth";
-import { discordTokenHash, recordDiscordEvent } from "@/lib/discord";
+import {
+  completeDiscordLinkedOnboarding,
+  discordTokenHash,
+  recordDiscordEvent,
+} from "@/lib/discord";
 
 export async function connectDiscordAccount(formData: FormData) {
   const member = await getCurrentMember();
@@ -87,10 +91,12 @@ export async function connectDiscordAccount(formData: FormData) {
     kind: "ACCOUNT_LINKED",
     metadata: { memberId: member.id },
   });
+  await completeDiscordLinkedOnboarding({
+    guildMemberId: discordMember.id,
+  });
   redirect(
     member.status === "ACTIVE"
       ? "/portal?tab=connections&discord=linked"
       : "/pending?discord=linked",
   );
 }
-

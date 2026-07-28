@@ -988,6 +988,17 @@ export const publicSettings = pgTable("public_settings", {
     .$type<CustomPage[]>()
     .notNull()
     .default([]),
+  constitutionDocumentId: uuid("constitution_document_id").references(
+    () => internalDocuments.id,
+    { onDelete: "set null" },
+  ),
+  constitutionVersion: text("constitution_version"),
+  constitutionEffectiveDate: timestamp("constitution_effective_date", {
+    withTimezone: true,
+  }),
+  constitutionPublishedAt: timestamp("constitution_published_at", {
+    withTimezone: true,
+  }),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -2020,6 +2031,12 @@ export const discordGuilds = pgTable("discord_guilds", {
   messageReactionEmoji: text("message_reaction_emoji")
     .notNull()
     .default("✅"),
+  onboardingEnabled: boolean("onboarding_enabled").notNull().default(true),
+  securityDelayMinutes: integer("security_delay_minutes")
+    .notNull()
+    .default(10),
+  agreedRoleId: text("agreed_role_id"),
+  vexUMemberRoleId: text("vex_u_member_role_id"),
   installedByDiscordUserId: text("installed_by_discord_user_id"),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -2080,6 +2097,20 @@ export const discordGuildMembers = pgTable(
     registrationReminderCount: integer("registration_reminder_count")
       .notNull()
       .default(0),
+    onboardingDmSentAt: timestamp("onboarding_dm_sent_at", {
+      withTimezone: true,
+    }),
+    securityDelayEndsAt: timestamp("security_delay_ends_at", {
+      withTimezone: true,
+    }),
+    securityDelayNotificationSentAt: timestamp(
+      "security_delay_notification_sent_at",
+      { withTimezone: true },
+    ),
+    onboardingRolesAssignedAt: timestamp("onboarding_roles_assigned_at", {
+      withTimezone: true,
+    }),
+    onboardingRoleError: text("onboarding_role_error"),
     remindersOptedOut: boolean("reminders_opted_out")
       .notNull()
       .default(false),

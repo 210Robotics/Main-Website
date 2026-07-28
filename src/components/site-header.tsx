@@ -26,6 +26,7 @@ const programLinks: NavigationLink[] = [
 const exploreLinks: NavigationLink[] = [
   { href: "/events", label: "Events" },
   { href: "/media", label: "Media" },
+  { href: "/constitution", label: "Constitution" },
   { href: "/sponsors", label: "Sponsors" },
   { href: "/impact", label: "Impact" },
   { href: "https://docs.210robotics.com", label: "Docs" },

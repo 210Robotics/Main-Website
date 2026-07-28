@@ -93,6 +93,7 @@ type RecordingSession = StartRequest & {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
@@ -102,6 +103,7 @@ const client = new Client({
 });
 const sessions = new Map<string, RecordingSession>();
 const speechQueues = new Map<string, Promise<void>>();
+let onboardingTimer: ReturnType<typeof setInterval> | null = null;
 
 function json(
   response: ServerResponse,
@@ -744,6 +746,86 @@ async function startSession(input: StartRequest) {
   return session;
 }
 
+async function postWebsiteWorkflow(
+  path: string,
+  body: Record<string, unknown>,
+  timeoutMs = 60_000,
+) {
+  const siteUrl = (
+    process.env.SITE_URL || "https://210robotics.com"
+  ).replace(/\/$/, "");
+  const secret = process.env.DISCORD_VOICE_WORKER_SECRET;
+  if (!secret) throw new Error("DISCORD_VOICE_WORKER_SECRET is required.");
+  const response = await fetch(`${siteUrl}${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${secret}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    throw new Error(`Website workflow returned ${response.status}: ${detail}`);
+  }
+  return response.json() as Promise<Record<string, unknown>>;
+}
+
+async function processDueOnboarding() {
+  try {
+    const result = await postWebsiteWorkflow(
+      "/api/discord/onboarding/process",
+      {},
+      120_000,
+    );
+    if (Number(result.notified || 0) > 0 || Number(result.rolesAssigned || 0) > 0) {
+      console.info(
+        JSON.stringify({
+          event: "discord.onboarding.processed",
+          ...result,
+        }),
+      );
+    }
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "discord.onboarding.processor_failed",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+}
+
+client.on("guildMemberAdd", (member) => {
+  void postWebsiteWorkflow("/api/discord/member-events", {
+    event: "GUILD_MEMBER_ADD",
+    guildId: member.guild.id,
+    guildName: member.guild.name,
+    joinedAt: member.joinedAt?.toISOString() || new Date().toISOString(),
+    user: {
+      id: member.user.id,
+      username: member.user.username,
+      displayName:
+        member.displayName ||
+        member.user.globalName ||
+        member.user.username,
+      avatar: member.user.avatar,
+      bot: member.user.bot,
+      roles: member.roles.cache.map((role) => role.id),
+    },
+  }).catch((error) => {
+    console.error(
+      JSON.stringify({
+        event: "discord.member_join_onboarding_failed",
+        guildId: member.guild.id,
+        discordUserId: member.user.id,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  });
+});
+
 client.on("voiceStateUpdate", (oldState, newState) => {
   const guildId = newState.guild.id || oldState.guild.id;
   const session = sessions.get(guildId);
@@ -882,6 +964,7 @@ const server = createServer(async (request, response) => {
       speakerAttributionReady: true,
       dynamicReactionsReady: true,
       geminiDirectMessagesReady: true,
+      memberOnboardingReady: true,
     });
   }
   if (!authorized(request)) {
@@ -978,6 +1061,10 @@ async function main() {
     throw new Error("DISCORD_VOICE_WORKER_SECRET is required.");
   }
   await client.login(token);
+  void processDueOnboarding();
+  onboardingTimer = setInterval(() => {
+    void processDueOnboarding();
+  }, 60_000);
   server.listen(PORT, () => {
     console.info(
       JSON.stringify({
@@ -990,6 +1077,7 @@ async function main() {
 }
 
 process.on("SIGTERM", () => {
+  if (onboardingTimer) clearInterval(onboardingTimer);
   for (const session of sessions.values()) {
     void finishSession(session, "worker-shutdown");
   }

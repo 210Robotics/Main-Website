@@ -29,6 +29,7 @@ export function SiteFooter() {
             <Link href="/events">Events</Link>
             <Link href="/media">Media</Link>
             <Link href="/resources">Resources</Link>
+            <Link href="/constitution">Constitution</Link>
             <Link href="/impact">Annual impact</Link>
           </div>
         </div>

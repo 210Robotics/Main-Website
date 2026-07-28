@@ -72,6 +72,7 @@ import { PollManager } from "@/components/poll-manager";
 import { DashboardNavigation } from "@/components/dashboard-navigation";
 import { WebsiteContentEditor } from "@/components/website-content-editor";
 import { InternalDocumentsManager } from "@/components/internal-documents-manager";
+import { ConstitutionManager } from "@/components/constitution-manager";
 import { AssistantWorkspace } from "@/components/team-os-workspace";
 import { DiscordAdminPanel } from "@/components/discord-admin-panel";
 import { MembershipDuesPanel } from "@/components/membership-dues-panel";
@@ -315,7 +316,10 @@ export default async function AdminPage({
           .orderBy(desc(contributions.contributionDate))
           .limit(250)
       : Promise.resolve([]),
-    load.settings && (actor.accessRole === "SUPER_ADMIN" || canContent)
+    load.settings &&
+    (actor.accessRole === "SUPER_ADMIN" ||
+      canContent ||
+      (tab === "constitution" && canDocuments))
       ? getDb().select().from(publicSettings).limit(1)
       : Promise.resolve([]),
     load.roster && canDirectory
@@ -683,6 +687,11 @@ export default async function AdminPage({
             ...(canDocuments
               ? [
                   {
+                    value: "constitution",
+                    label: "Constitution",
+                    href: "/admin?tab=constitution",
+                  },
+                  {
                     value: "documents",
                     label: "Internal documents",
                     href: "/admin?tab=documents",
@@ -953,6 +962,41 @@ export default async function AdminPage({
                   editorName: editorName || "Former member",
                 }),
               )}
+            />
+          </Panel>
+        )}
+        {canDocuments && tab === "constitution" && (
+          <Panel
+            id="constitution-manager"
+            title="Organization constitution"
+            eyebrow="Upload, archive, and publish the current approved version"
+          >
+            <ConstitutionManager
+              uploaderId={actor.id}
+              documents={internalDocumentRows
+                .filter(
+                  ({ document }) =>
+                    document.category.trim().toLowerCase() === "constitution",
+                )
+                .map(({ document }) => ({
+                  id: document.id,
+                  title: document.title,
+                  originalFilename: document.originalFilename,
+                  mimeType: document.mimeType,
+                  bytes: document.bytes,
+                  currentVersion: document.currentVersion,
+                  updatedAt: document.updatedAt.toISOString(),
+                }))}
+              publishedDocumentId={
+                siteSettings?.constitutionDocumentId ?? null
+              }
+              publishedVersion={siteSettings?.constitutionVersion ?? null}
+              effectiveDate={
+                siteSettings?.constitutionEffectiveDate?.toISOString() ?? null
+              }
+              publishedAt={
+                siteSettings?.constitutionPublishedAt?.toISOString() ?? null
+              }
             />
           </Panel>
         )}

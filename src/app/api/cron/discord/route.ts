@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   discordConfiguration,
+  processDiscordOnboarding,
   registerDiscordCommands,
   sendDiscordCalendarReminders,
   sendDiscordMonthlyCalendarDigest,
@@ -25,7 +26,14 @@ export async function GET(request: NextRequest) {
   }
   try {
     const result = await syncDiscordGuild();
-    const [commands, messages, reminders, monthlyDigest, registrationDms] =
+    const [
+      commands,
+      messages,
+      reminders,
+      monthlyDigest,
+      registrationDms,
+      onboarding,
+    ] =
       await Promise.all([
         registerDiscordCommands(result.guildId),
         syncDiscordMessages(result.guildId),
@@ -34,6 +42,10 @@ export async function GET(request: NextRequest) {
         sendDiscordRegistrationReminders({
           guildId: result.guildId,
           limit: 25,
+        }),
+        processDiscordOnboarding({
+          guildId: result.guildId,
+          limit: 100,
         }),
       ]);
     return NextResponse.json({
@@ -44,6 +56,7 @@ export async function GET(request: NextRequest) {
       reminders,
       monthlyDigest,
       registrationDms,
+      onboarding,
     });
   } catch (error) {
     console.error("Scheduled Discord synchronization failed", error);

@@ -16,6 +16,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/events",
     "/media",
     "/resources",
+    "/constitution",
     "/join",
     "/contact",
     "/privacy",

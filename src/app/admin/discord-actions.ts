@@ -14,9 +14,12 @@ import {
 } from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
 import {
+  assignDiscordOnboardingRoles,
   discordConfiguration,
+  listDiscordGuildRoles,
   listDiscordVoiceChannels,
   normalizeDiscordReactionEmoji,
+  processDiscordOnboarding,
   registerDiscordCommands,
   sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
@@ -511,6 +514,96 @@ export async function saveDiscordReactionSettings(formData: FormData) {
     entityType: "discord_guild",
     entityId: guildId,
     details: { enabled, emoji },
+  });
+  revalidatePath("/admin");
+}
+
+export async function saveDiscordOnboardingSettings(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const agreedRoleId = required(formData, "agreedRoleId");
+  const vexUMemberRoleId = required(formData, "vexUMemberRoleId");
+  const securityDelayMinutes = Number(
+    formData.get("securityDelayMinutes") || 10,
+  );
+  if (
+    !Number.isInteger(securityDelayMinutes) ||
+    securityDelayMinutes < 1 ||
+    securityDelayMinutes > 60
+  ) {
+    throw new Error("The security delay must be between 1 and 60 minutes.");
+  }
+  if (agreedRoleId === vexUMemberRoleId) {
+    throw new Error("Choose two different onboarding roles.");
+  }
+  const roles = await listDiscordGuildRoles(guildId);
+  const roleById = new Map(roles.map((role) => [role.id, role]));
+  const agreedRole = roleById.get(agreedRoleId);
+  const vexUMemberRole = roleById.get(vexUMemberRoleId);
+  if (
+    !agreedRole ||
+    agreedRole.managed ||
+    !vexUMemberRole ||
+    vexUMemberRole.managed
+  ) {
+    throw new Error("Choose two roles the 210 bot is allowed to manage.");
+  }
+  const onboardingEnabled = formData.get("onboardingEnabled") === "on";
+  await getDb()
+    .update(discordGuilds)
+    .set({
+      onboardingEnabled,
+      securityDelayMinutes,
+      agreedRoleId,
+      vexUMemberRoleId,
+      updatedAt: new Date(),
+    })
+    .where(eq(discordGuilds.id, guildId));
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_ONBOARDING_SETTINGS",
+    entityType: "discord_guild",
+    entityId: guildId,
+    details: {
+      onboardingEnabled,
+      securityDelayMinutes,
+      agreedRoleId,
+      agreedRoleName: agreedRole.name,
+      vexUMemberRoleId,
+      vexUMemberRoleName: vexUMemberRole.name,
+    },
+  });
+  revalidatePath("/admin");
+}
+
+export async function processDiscordOnboardingNow(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const result = await processDiscordOnboarding({ guildId, limit: 100 });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_ONBOARDING_PROCESSED",
+    entityType: "discord_guild",
+    entityId: guildId,
+    details: result,
+  });
+  revalidatePath("/admin");
+}
+
+export async function retryDiscordOnboardingRoles(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const discordUserId = required(formData, "discordUserId");
+  const result = await assignDiscordOnboardingRoles({
+    guildId,
+    discordUserId,
+  });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_ONBOARDING_ROLES_RETRIED",
+    entityType: "discord_member",
+    entityId: discordUserId,
+    details: { guildId, roleNames: result.roleNames },
   });
   revalidatePath("/admin");
 }
