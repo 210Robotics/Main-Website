@@ -184,7 +184,20 @@ export async function claimDiscordDmResponse({
       and(
         eq(discordDirectMessages.id, inboundMessageId),
         eq(discordDirectMessages.direction, "INBOUND"),
-        sql`COALESCE(${discordDirectMessages.metadata}->>'responseStatus', 'AWAITING_ADMIN') = 'AWAITING_ADMIN'`,
+        sql`(
+          COALESCE(
+            ${discordDirectMessages.metadata}->>'responseStatus',
+            'AWAITING_ADMIN'
+          ) = 'AWAITING_ADMIN'
+          OR (
+            ${discordDirectMessages.metadata}->>'responseStatus'
+              IN ('MANUAL_PROCESSING', 'GEMINI_PROCESSING')
+            AND COALESCE(
+              (${discordDirectMessages.metadata}->>'responseStartedAt')::timestamptz,
+              to_timestamp(0)
+            ) < now() - interval '2 minutes'
+          )
+        )`,
       ),
     )
     .returning();
