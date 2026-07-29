@@ -22,6 +22,18 @@ import {
   verifyDiscordSignature,
   type DiscordUser,
 } from "@/lib/discord";
+import {
+  claimDiscordDmResponse,
+  releaseDiscordDmResponse,
+  resolveDiscordDmAdminUserId,
+  sendGeminiDiscordDmReply,
+  sendManualDiscordDmReply,
+} from "@/lib/discord-private-dm";
+import {
+  extractDiscordDmModalReply,
+  parseDiscordDmActionId,
+  parseDiscordDmModalId,
+} from "@/lib/discord-dm-interactions";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
 import { generateGeminiText } from "@/lib/team-ai";
 import {
@@ -48,9 +60,18 @@ type DiscordInteraction = {
   };
   application_id?: string;
   token?: string;
+  channel_id?: string;
+  message?: {
+    id: string;
+    content?: string;
+  };
   data?: {
     name?: string;
+    custom_id?: string;
     options?: Array<{ name: string; value: string | number | boolean }>;
+    components?: Array<{
+      components?: Array<{ custom_id?: string; value?: string }>;
+    }>;
   };
 };
 
@@ -85,6 +106,33 @@ function deferredInteractionResponse() {
   });
 }
 
+function dmReplyModal(inboundMessageId: string) {
+  return NextResponse.json({
+    type: 9,
+    data: {
+      custom_id: `dm:manual-submit:${inboundMessageId}`,
+      title: "Reply as the 210 Bot",
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: "reply",
+              label: "Your private reply",
+              style: 2,
+              min_length: 1,
+              max_length: 1_800,
+              required: true,
+              placeholder: "Write the response the member should receive...",
+            },
+          ],
+        },
+      ],
+    },
+  });
+}
+
 async function sendInteractionFollowup({
   applicationId,
   token,
@@ -108,6 +156,141 @@ async function sendInteractionFollowup({
   );
   if (!response.ok)
     throw new Error(`Discord follow-up failed (${response.status}).`);
+}
+
+async function authorizeDiscordDmDecision(user?: DiscordUser) {
+  if (!user) return null;
+  const adminDiscordUserId = await resolveDiscordDmAdminUserId();
+  return adminDiscordUserId && user.id === adminDiscordUserId
+    ? adminDiscordUserId
+    : null;
+}
+
+async function handleDiscordDmChoice(
+  interaction: DiscordInteraction,
+  user?: DiscordUser,
+) {
+  const action = parseDiscordDmActionId(interaction.data?.custom_id || "");
+  if (!action) {
+    return interactionResponse("That bot-inbox action is no longer valid.");
+  }
+  const adminDiscordUserId = await authorizeDiscordDmDecision(user);
+  if (!adminDiscordUserId) {
+    return interactionResponse(
+      "Only Jacob White's configured Discord account can choose this reply.",
+    );
+  }
+  if (action.kind === "manual") {
+    return dmReplyModal(action.inboundMessageId);
+  }
+
+  const claimed = await claimDiscordDmResponse({
+    inboundMessageId: action.inboundMessageId,
+    adminDiscordUserId,
+    mode: "GEMINI",
+  });
+  if (!claimed) {
+    return interactionResponse(
+      "This member message has already been answered or is currently being handled.",
+    );
+  }
+  const applicationId =
+    interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+  const interactionToken = interaction.token || "";
+  if (!applicationId || !interactionToken) {
+    await releaseDiscordDmResponse(
+      action.inboundMessageId,
+      "Discord did not provide an interaction token.",
+    );
+    return interactionResponse(
+      "Discord did not provide enough information to approve the Gemini reply.",
+    );
+  }
+  after(async () => {
+    try {
+      const result = await sendGeminiDiscordDmReply(action.inboundMessageId);
+      await sendInteractionFollowup({
+        applicationId,
+        token: interactionToken,
+        content: `Gemini replied privately to ${result.recipient.displayName}.`,
+      });
+    } catch (error) {
+      console.error("Approved Discord Gemini DM failed", error);
+      await releaseDiscordDmResponse(action.inboundMessageId, error);
+      await sendInteractionFollowup({
+        applicationId,
+        token: interactionToken,
+        content:
+          "Gemini could not send the reply. The message is available to try again.",
+      }).catch(() => undefined);
+    }
+  });
+  return deferredInteractionResponse();
+}
+
+async function handleDiscordDmManualReply(
+  interaction: DiscordInteraction,
+  user?: DiscordUser,
+) {
+  const modal = parseDiscordDmModalId(interaction.data?.custom_id || "");
+  const content = extractDiscordDmModalReply(interaction.data?.components);
+  if (!modal || !content) {
+    return interactionResponse(
+      "The manual reply was empty or the bot-inbox request expired.",
+    );
+  }
+  const adminDiscordUserId = await authorizeDiscordDmDecision(user);
+  if (!adminDiscordUserId) {
+    return interactionResponse(
+      "Only Jacob White's configured Discord account can send this reply.",
+    );
+  }
+  const claimed = await claimDiscordDmResponse({
+    inboundMessageId: modal.inboundMessageId,
+    adminDiscordUserId,
+    mode: "MANUAL",
+  });
+  if (!claimed) {
+    return interactionResponse(
+      "This member message has already been answered or is currently being handled.",
+    );
+  }
+  const applicationId =
+    interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+  const interactionToken = interaction.token || "";
+  if (!applicationId || !interactionToken) {
+    await releaseDiscordDmResponse(
+      modal.inboundMessageId,
+      "Discord did not provide an interaction token.",
+    );
+    return interactionResponse(
+      "Discord did not provide enough information to send the manual reply.",
+    );
+  }
+  after(async () => {
+    try {
+      const result = await sendManualDiscordDmReply({
+        inboundMessageId: modal.inboundMessageId,
+        content,
+        adminDiscordUserId,
+      });
+      await sendInteractionFollowup({
+        applicationId,
+        token: interactionToken,
+        content: `Your reply was sent privately to ${result.recipient.displayName} as the 210 Robotics bot.`,
+      });
+    } catch (error) {
+      console.error("Manual Discord DM modal reply failed", error);
+      await releaseDiscordDmResponse(modal.inboundMessageId, error);
+      await sendInteractionFollowup({
+        applicationId,
+        token: interactionToken,
+        content:
+          "Your reply could not be sent. The message is available to try again.",
+      }).catch(() => undefined);
+    }
+  });
+  return deferredInteractionResponse();
 }
 
 function isAdministrator(permissionValue?: string) {
@@ -137,13 +320,19 @@ export async function POST(request: Request) {
     return new NextResponse("Invalid JSON", { status: 400 });
   }
   if (interaction.type === 1) return NextResponse.json({ type: 1 });
+  const user = interaction.member?.user || interaction.user;
+  if (interaction.type === 3) {
+    return handleDiscordDmChoice(interaction, user);
+  }
+  if (interaction.type === 5) {
+    return handleDiscordDmManualReply(interaction, user);
+  }
   if (interaction.type !== 2) {
     return interactionResponse("That Discord interaction is not supported.");
   }
 
   const commandName = interaction.data?.name?.toLowerCase() ?? "";
   const guildId = interaction.guild_id || interaction.guild?.id;
-  const user = interaction.member?.user || interaction.user;
   if (!guildId || !user) {
     return interactionResponse(
       "This command must be used inside the 210 Robotics Discord server.",

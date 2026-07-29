@@ -1266,10 +1266,12 @@ export async function sendDiscordChannelMessage({
 export async function sendDiscordDirectMessage({
   discordUserId,
   content,
+  components,
   log,
 }: {
   discordUserId: string;
   content: string;
+  components?: Array<Record<string, unknown>>;
   log?: {
     username?: string;
     displayName?: string;
@@ -1294,6 +1296,7 @@ export async function sendDiscordDirectMessage({
       body: JSON.stringify({
         content: message,
         allowed_mentions: { parse: [] },
+        ...(components?.length ? { components } : {}),
       }),
     },
   );
