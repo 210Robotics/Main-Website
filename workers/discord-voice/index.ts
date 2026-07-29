@@ -40,6 +40,8 @@ const MAX_SPEAKER_TRACK_BYTES = 8 * 1024 * 1024;
 const MAX_SPEAKER_TRACK_TOTAL_BYTES = 14 * 1024 * 1024;
 const MAX_SPEAKER_TRACKS = 12;
 const RECORDING_NOTICE = "This channel is being recorded";
+const ACTIVE_RECORDING_KEEPALIVE_MS = 4 * 60 * 1_000;
+const KEEPALIVE_TIMEOUT_MS = 15_000;
 
 type StartRequest = {
   guildId: string;
@@ -104,6 +106,8 @@ const client = new Client({
 const sessions = new Map<string, RecordingSession>();
 const speechQueues = new Map<string, Promise<void>>();
 let onboardingTimer: ReturnType<typeof setInterval> | null = null;
+let recordingKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+let shutdownPromise: Promise<void> | null = null;
 
 function json(
   response: ServerResponse,
@@ -584,10 +588,116 @@ async function finishSession(session: RecordingSession, reason: string) {
     );
   } finally {
     sessions.delete(session.guildId);
+    synchronizeRecordingKeepalive();
     await rm(session.tempDirectory, { recursive: true, force: true }).catch(
       () => undefined,
     );
   }
+}
+
+async function pingRecordingKeepalive() {
+  const externalUrl = process.env.RENDER_EXTERNAL_URL?.replace(/\/$/, "");
+  if (!externalUrl || !sessions.size) return;
+  try {
+    const response = await fetch(
+      `${externalUrl}/health?source=active-recording`,
+      {
+        headers: {
+          "user-agent": "210-robotics-active-recording-keepalive/1.0",
+        },
+        signal: AbortSignal.timeout(KEEPALIVE_TIMEOUT_MS),
+        cache: "no-store",
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Keepalive returned ${response.status}.`);
+    }
+    console.info(
+      JSON.stringify({
+        event: "discord.voice.recording_keepalive",
+        activeRecordings: sessions.size,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "discord.voice.recording_keepalive_failed",
+        activeRecordings: sessions.size,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+}
+
+function synchronizeRecordingKeepalive() {
+  if (sessions.size && !recordingKeepaliveTimer) {
+    void pingRecordingKeepalive();
+    recordingKeepaliveTimer = setInterval(() => {
+      void pingRecordingKeepalive();
+    }, ACTIVE_RECORDING_KEEPALIVE_MS);
+    return;
+  }
+  if (!sessions.size && recordingKeepaliveTimer) {
+    clearInterval(recordingKeepaliveTimer);
+    recordingKeepaliveTimer = null;
+  }
+}
+
+function monitorVoiceConnection(session: RecordingSession) {
+  session.connection.on("stateChange", (previous, next) => {
+    console.info(
+      JSON.stringify({
+        event: "discord.voice.connection_state_changed",
+        sessionId: session.id,
+        previousStatus: previous.status,
+        nextStatus: next.status,
+      }),
+    );
+  });
+  session.connection.on("error", (error) => {
+    console.error(
+      JSON.stringify({
+        event: "discord.voice.connection_error",
+        sessionId: session.id,
+        error: error.message,
+      }),
+    );
+  });
+  session.connection.on(VoiceConnectionStatus.Disconnected, () => {
+    void (async () => {
+      try {
+        await Promise.race([
+          entersState(
+            session.connection,
+            VoiceConnectionStatus.Signalling,
+            5_000,
+          ),
+          entersState(
+            session.connection,
+            VoiceConnectionStatus.Connecting,
+            5_000,
+          ),
+        ]);
+      } catch {
+        try {
+          await entersState(
+            session.connection,
+            VoiceConnectionStatus.Ready,
+            20_000,
+          );
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              event: "discord.voice.connection_recovery_failed",
+              sessionId: session.id,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+          await finishSession(session, "voice-connection-lost");
+        }
+      }
+    })();
+  });
 }
 
 function updateEmptyChannelTimer(session: RecordingSession) {
@@ -733,6 +843,8 @@ async function startSession(input: StartRequest) {
     subscribeToSpeaker(session, userId),
   );
   sessions.set(input.guildId, session);
+  monitorVoiceConnection(session);
+  synchronizeRecordingKeepalive();
   updateEmptyChannelTimer(session);
   console.info(
     JSON.stringify({
@@ -965,6 +1077,10 @@ const server = createServer(async (request, response) => {
       dynamicReactionsReady: true,
       geminiDirectMessagesReady: true,
       memberOnboardingReady: true,
+      recordingKeepaliveActive: Boolean(recordingKeepaliveTimer),
+      renderExternalUrlConfigured: Boolean(process.env.RENDER_EXTERNAL_URL),
+      uptimeSeconds: Math.round(process.uptime()),
+      commit: process.env.RENDER_GIT_COMMIT?.slice(0, 12) || null,
     });
   }
   if (!authorized(request)) {
@@ -1076,13 +1192,76 @@ async function main() {
   });
 }
 
-process.on("SIGTERM", () => {
+async function closeHttpServer() {
+  await new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+}
+
+async function gracefulShutdown(signal: string) {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    console.info(
+      JSON.stringify({
+        event: "discord.voice.worker_shutdown_started",
+        signal,
+        activeRecordings: sessions.size,
+      }),
+    );
+    if (onboardingTimer) clearInterval(onboardingTimer);
+    onboardingTimer = null;
+    if (recordingKeepaliveTimer) clearInterval(recordingKeepaliveTimer);
+    recordingKeepaliveTimer = null;
+    await Promise.allSettled(
+      [...sessions.values()].map((session) =>
+        finishSession(session, "worker-shutdown"),
+      ),
+    );
+    await closeHttpServer();
+    client.destroy();
+    console.info(
+      JSON.stringify({
+        event: "discord.voice.worker_shutdown_completed",
+        signal,
+      }),
+    );
+  })();
+  return shutdownPromise;
+}
+
+process.once("SIGTERM", () => {
+  void gracefulShutdown("SIGTERM")
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error(
+        JSON.stringify({
+          event: "discord.voice.worker_shutdown_failed",
+          signal: "SIGTERM",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      process.exit(1);
+    });
+});
+
+process.once("SIGINT", () => {
+  void gracefulShutdown("SIGINT")
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error(
+        JSON.stringify({
+          event: "discord.voice.worker_shutdown_failed",
+          signal: "SIGINT",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      process.exit(1);
+    });
+});
+
+process.on("beforeExit", () => {
   if (onboardingTimer) clearInterval(onboardingTimer);
-  for (const session of sessions.values()) {
-    void finishSession(session, "worker-shutdown");
-  }
-  server.close();
-  client.destroy();
+  if (recordingKeepaliveTimer) clearInterval(recordingKeepaliveTimer);
 });
 
 void main().catch((error) => {

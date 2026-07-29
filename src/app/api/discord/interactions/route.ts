@@ -166,7 +166,7 @@ async function authorizeDiscordDmDecision(user?: DiscordUser) {
     : null;
 }
 
-async function handleDiscordDmChoice(
+function handleDiscordDmChoice(
   interaction: DiscordInteraction,
   user?: DiscordUser,
 ) {
@@ -174,40 +174,46 @@ async function handleDiscordDmChoice(
   if (!action) {
     return interactionResponse("That bot-inbox action is no longer valid.");
   }
-  const adminDiscordUserId = await authorizeDiscordDmDecision(user);
-  if (!adminDiscordUserId) {
-    return interactionResponse(
-      "Only Jacob White's configured Discord account can choose this reply.",
-    );
-  }
   if (action.kind === "manual") {
     return dmReplyModal(action.inboundMessageId);
   }
 
-  const claimed = await claimDiscordDmResponse({
-    inboundMessageId: action.inboundMessageId,
-    adminDiscordUserId,
-    mode: "GEMINI",
-  });
-  if (!claimed) {
-    return interactionResponse(
-      "This member message has already been answered or is currently being handled.",
-    );
-  }
   const applicationId =
     interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
   const interactionToken = interaction.token || "";
   if (!applicationId || !interactionToken) {
-    await releaseDiscordDmResponse(
-      action.inboundMessageId,
-      "Discord did not provide an interaction token.",
-    );
     return interactionResponse(
       "Discord did not provide enough information to approve the Gemini reply.",
     );
   }
   after(async () => {
+    let claimed = false;
     try {
+      const adminDiscordUserId = await authorizeDiscordDmDecision(user);
+      if (!adminDiscordUserId) {
+        await sendInteractionFollowup({
+          applicationId,
+          token: interactionToken,
+          content:
+            "Only Jacob White's configured Discord account can approve this reply.",
+        });
+        return;
+      }
+      const responseClaim = await claimDiscordDmResponse({
+        inboundMessageId: action.inboundMessageId,
+        adminDiscordUserId,
+        mode: "GEMINI",
+      });
+      if (!responseClaim) {
+        await sendInteractionFollowup({
+          applicationId,
+          token: interactionToken,
+          content:
+            "This member message has already been answered or is currently being handled.",
+        });
+        return;
+      }
+      claimed = true;
       const result = await sendGeminiDiscordDmReply(action.inboundMessageId);
       await sendInteractionFollowup({
         applicationId,
@@ -216,7 +222,9 @@ async function handleDiscordDmChoice(
       });
     } catch (error) {
       console.error("Approved Discord Gemini DM failed", error);
-      await releaseDiscordDmResponse(action.inboundMessageId, error);
+      if (claimed) {
+        await releaseDiscordDmResponse(action.inboundMessageId, error);
+      }
       await sendInteractionFollowup({
         applicationId,
         token: interactionToken,
@@ -228,7 +236,7 @@ async function handleDiscordDmChoice(
   return deferredInteractionResponse();
 }
 
-async function handleDiscordDmManualReply(
+function handleDiscordDmManualReply(
   interaction: DiscordInteraction,
   user?: DiscordUser,
 ) {
@@ -239,36 +247,42 @@ async function handleDiscordDmManualReply(
       "The manual reply was empty or the bot-inbox request expired.",
     );
   }
-  const adminDiscordUserId = await authorizeDiscordDmDecision(user);
-  if (!adminDiscordUserId) {
-    return interactionResponse(
-      "Only Jacob White's configured Discord account can send this reply.",
-    );
-  }
-  const claimed = await claimDiscordDmResponse({
-    inboundMessageId: modal.inboundMessageId,
-    adminDiscordUserId,
-    mode: "MANUAL",
-  });
-  if (!claimed) {
-    return interactionResponse(
-      "This member message has already been answered or is currently being handled.",
-    );
-  }
   const applicationId =
     interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
   const interactionToken = interaction.token || "";
   if (!applicationId || !interactionToken) {
-    await releaseDiscordDmResponse(
-      modal.inboundMessageId,
-      "Discord did not provide an interaction token.",
-    );
     return interactionResponse(
       "Discord did not provide enough information to send the manual reply.",
     );
   }
   after(async () => {
+    let claimed = false;
     try {
+      const adminDiscordUserId = await authorizeDiscordDmDecision(user);
+      if (!adminDiscordUserId) {
+        await sendInteractionFollowup({
+          applicationId,
+          token: interactionToken,
+          content:
+            "Only Jacob White's configured Discord account can send this reply.",
+        });
+        return;
+      }
+      const responseClaim = await claimDiscordDmResponse({
+        inboundMessageId: modal.inboundMessageId,
+        adminDiscordUserId,
+        mode: "MANUAL",
+      });
+      if (!responseClaim) {
+        await sendInteractionFollowup({
+          applicationId,
+          token: interactionToken,
+          content:
+            "This member message has already been answered or is currently being handled.",
+        });
+        return;
+      }
+      claimed = true;
       const result = await sendManualDiscordDmReply({
         inboundMessageId: modal.inboundMessageId,
         content,
@@ -281,7 +295,9 @@ async function handleDiscordDmManualReply(
       });
     } catch (error) {
       console.error("Manual Discord DM modal reply failed", error);
-      await releaseDiscordDmResponse(modal.inboundMessageId, error);
+      if (claimed) {
+        await releaseDiscordDmResponse(modal.inboundMessageId, error);
+      }
       await sendInteractionFollowup({
         applicationId,
         token: interactionToken,
