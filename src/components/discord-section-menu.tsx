@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 const sections = [
   { id: "discord-overview", label: "Overview & setup" },
+  { id: "discord-dues-access", label: "Membership dues & channel access" },
   { id: "discord-onboarding", label: "Join DMs, delay & automatic roles" },
   { id: "discord-calendar", label: "Calendar reminders & digest" },
   {

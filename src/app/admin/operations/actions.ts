@@ -1,7 +1,7 @@
 "use server";
 
 import { randomBytes } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -786,6 +786,22 @@ export async function saveEngineeringPart(formData: FormData) {
     notes: textValue(formData, "notes"),
     updatedAt: new Date(),
   };
+  const [duplicate] = await getDb()
+    .select({ id: engineeringParts.id })
+    .from(engineeringParts)
+    .where(
+      and(
+        eq(engineeringParts.project, values.project),
+        eq(engineeringParts.partNumber, values.partNumber),
+        id ? ne(engineeringParts.id, id) : undefined,
+      ),
+    )
+    .limit(1);
+  if (duplicate) {
+    throw new Error(
+      `Part ${values.partNumber} already exists in ${values.project}. Open that record to update its quantity or revision.`,
+    );
+  }
   if (id) {
     const [row] = await getDb()
       .update(engineeringParts)
@@ -989,9 +1005,13 @@ export async function saveManufacturingStep(formData: FormData) {
   const actor = await requirePermission("engineering.manage");
   const id = textValue(formData, "id");
   const status = textValue(formData, "status") || "NOT_STARTED";
+  const sequence = Number(textValue(formData, "sequence") || "10");
+  if (!Number.isInteger(sequence) || sequence < 1 || sequence > 100_000) {
+    throw new Error("Operation sequence must be a whole number from 1 to 100,000.");
+  }
   const values = {
     partId: textValue(formData, "partId", true),
-    sequence: Math.max(1, Number(textValue(formData, "sequence") || "10")),
+    sequence,
     process: textValue(formData, "process", true),
     machine: textValue(formData, "machine"),
     setup: textValue(formData, "setup"),
@@ -1002,6 +1022,22 @@ export async function saveManufacturingStep(formData: FormData) {
     completedAt: status === "COMPLETE" ? new Date() : null,
     updatedAt: new Date(),
   };
+  const [duplicate] = await getDb()
+    .select({ id: manufacturingSteps.id })
+    .from(manufacturingSteps)
+    .where(
+      and(
+        eq(manufacturingSteps.partId, values.partId),
+        eq(manufacturingSteps.sequence, sequence),
+        id ? ne(manufacturingSteps.id, id) : undefined,
+      ),
+    )
+    .limit(1);
+  if (duplicate) {
+    throw new Error(
+      `This part already has operation ${sequence}. Choose the next sequence number or edit the existing operation.`,
+    );
+  }
   if (id) {
     const [row] = await getDb()
       .update(manufacturingSteps)

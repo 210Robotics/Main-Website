@@ -26,7 +26,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
           </h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-[#c8c5bf] lg:mt-7 lg:text-lg lg:leading-8">
             Record hours, document contributions, manage your public profile,
-            and keep the teamâ€™s work visible.
+            and keep the team’s work visible.
           </p>
           <p className="mt-4 text-sm leading-6 text-[#999] lg:mt-7 lg:leading-7">
             Continue with Google or use email and password. Every new account

@@ -3,12 +3,17 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { donations } from "@/db/schema";
+import {
+  donations,
+  membershipDuesPayments,
+} from "@/db/schema";
 import {
   DEFAULT_DONATION_CAMPAIGN,
   syncDonationIncomeEntry,
 } from "@/lib/donations";
 import { getStripe } from "@/lib/stripe";
+import { recalculateMembershipDues } from "@/lib/membership-dues-server";
+import { syncDiscordDuesAccessForMember } from "@/lib/discord";
 
 export const runtime = "nodejs";
 
@@ -25,6 +30,10 @@ function customValue(session: Stripe.Checkout.Session, key: string) {
 }
 
 async function recordCheckout(session: Stripe.Checkout.Session) {
+  if (session.metadata?.purpose === "membership_dues") {
+    await recordMembershipDuesCheckout(session);
+    return;
+  }
   if (session.metadata?.purpose !== "donation") return;
   const campaignId =
     session.metadata.campaignId || DEFAULT_DONATION_CAMPAIGN.id;
@@ -68,7 +77,67 @@ async function recordCheckout(session: Stripe.Checkout.Session) {
   if (donation) await syncDonationIncomeEntry(donation);
 }
 
+async function refreshMembershipDuesAccess(
+  membershipDuesId: string,
+  memberId: string,
+) {
+  await recalculateMembershipDues(membershipDuesId);
+  try {
+    await syncDiscordDuesAccessForMember(memberId);
+  } catch (error) {
+    console.error("Discord dues access did not synchronize after Stripe", {
+      memberId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function recordMembershipDuesCheckout(
+  session: Stripe.Checkout.Session,
+) {
+  const membershipDuesId = session.metadata?.membershipDuesId;
+  const memberId = session.metadata?.memberId;
+  if (!membershipDuesId || !memberId) {
+    throw new Error("Membership dues checkout metadata is incomplete.");
+  }
+  const paid = session.payment_status === "paid";
+  await getDb()
+    .insert(membershipDuesPayments)
+    .values({
+      membershipDuesId,
+      memberId,
+      stripeCheckoutSessionId: session.id,
+      stripePaymentIntentId: objectId(session.payment_intent),
+      amountCents: session.amount_total ?? 0,
+      currency: session.currency ?? "usd",
+      status: paid ? "PAID" : "PROCESSING",
+      paidAt: paid ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: membershipDuesPayments.stripeCheckoutSessionId,
+      set: {
+        stripePaymentIntentId: objectId(session.payment_intent),
+        amountCents: session.amount_total ?? 0,
+        currency: session.currency ?? "usd",
+        status: paid ? "PAID" : "PROCESSING",
+        paidAt: paid ? new Date() : null,
+        updatedAt: new Date(),
+      },
+    });
+  await refreshMembershipDuesAccess(membershipDuesId, memberId);
+}
+
 async function expireCheckout(session: Stripe.Checkout.Session) {
+  if (session.metadata?.purpose === "membership_dues") {
+    await getDb()
+      .update(membershipDuesPayments)
+      .set({ status: "EXPIRED", updatedAt: new Date() })
+      .where(
+        eq(membershipDuesPayments.stripeCheckoutSessionId, session.id),
+      );
+    return;
+  }
   if (session.metadata?.purpose !== "donation") return;
   await getDb()
     .update(donations)
@@ -77,6 +146,15 @@ async function expireCheckout(session: Stripe.Checkout.Session) {
 }
 
 async function failCheckout(session: Stripe.Checkout.Session) {
+  if (session.metadata?.purpose === "membership_dues") {
+    await getDb()
+      .update(membershipDuesPayments)
+      .set({ status: "FAILED", updatedAt: new Date() })
+      .where(
+        eq(membershipDuesPayments.stripeCheckoutSessionId, session.id),
+      );
+    return;
+  }
   if (session.metadata?.purpose !== "donation") return;
   await getDb()
     .update(donations)
@@ -98,6 +176,21 @@ async function recordRefund(charge: Stripe.Charge) {
     .where(eq(donations.stripePaymentIntentId, paymentIntentId))
     .returning();
   if (donation) await syncDonationIncomeEntry(donation);
+  const [duesPayment] = await getDb()
+    .update(membershipDuesPayments)
+    .set({
+      refundedCents: charge.amount_refunded,
+      status: fullyRefunded ? "REFUNDED" : "PAID",
+      updatedAt: new Date(),
+    })
+    .where(eq(membershipDuesPayments.stripePaymentIntentId, paymentIntentId))
+    .returning();
+  if (duesPayment) {
+    await refreshMembershipDuesAccess(
+      duesPayment.membershipDuesId,
+      duesPayment.memberId,
+    );
+  }
 }
 
 async function recordDispute(dispute: Stripe.Dispute) {
@@ -110,6 +203,17 @@ async function recordDispute(dispute: Stripe.Dispute) {
     .where(eq(donations.stripePaymentIntentId, paymentIntentId))
     .returning();
   if (donation) await syncDonationIncomeEntry(donation);
+  const [duesPayment] = await getDb()
+    .update(membershipDuesPayments)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(membershipDuesPayments.stripePaymentIntentId, paymentIntentId))
+    .returning();
+  if (duesPayment) {
+    await refreshMembershipDuesAccess(
+      duesPayment.membershipDuesId,
+      duesPayment.memberId,
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -155,6 +259,7 @@ export async function POST(request: Request) {
     revalidatePath("/donate");
     revalidatePath("/sponsors");
     revalidatePath("/admin/operations");
+    revalidatePath("/portal");
     return NextResponse.json({ received: true });
   } catch {
     return NextResponse.json({ error: "Event processing failed" }, { status: 500 });

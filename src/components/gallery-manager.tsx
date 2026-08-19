@@ -103,7 +103,7 @@ export function GalleryManager({
   function archiveEvent(event: GalleryEvent) {
     if (
       !window.confirm(
-        `Archive the â€œ${event.title}â€ gallery event? Its photos will remain stored.`,
+        `Archive the “${event.title}” gallery event? Its photos will remain stored.`,
       )
     )
       return;
@@ -193,7 +193,7 @@ export function GalleryManager({
     setUploading(true);
     setMessage({
       status: "idle",
-      message: `Uploading ${chosen.length} photo${chosen.length === 1 ? "" : "s"}â€¦`,
+      message: `Uploading ${chosen.length} photo${chosen.length === 1 ? "" : "s"}…`,
     });
     try {
       const ids: string[] = [];
@@ -328,7 +328,7 @@ export function GalleryManager({
             <strong className="block text-sm">{event.title}</strong>
             <span className="mt-1 block text-[.65rem] text-[#777]">
               {assets.filter((asset) => belongsToEvent(asset, event)).length}{" "}
-              photos{event.driveFolderId ? " Â· Drive linked" : ""}
+              photos{event.driveFolderId ? " · Drive linked" : ""}
             </span>
           </button>
         ))}

@@ -32,6 +32,8 @@ import {
   sendDiscordRegistrationReminders,
   setDiscordChannelSlowmode,
   setDiscordGuildMemberTimeout,
+  syncDiscordDuesAccess,
+  syncDiscordDuesAccessForMember,
   syncDiscordGuild,
   syncDiscordMessages,
   upsertDiscordGuild,
@@ -41,6 +43,7 @@ import {
   membershipDuesStatus,
   membershipDuesStatuses,
 } from "@/lib/membership-dues";
+import { recalculateMembershipDues } from "@/lib/membership-dues-server";
 import {
   speakDiscordVoiceMessage,
   stopAllDiscordVoiceRecordings,
@@ -573,6 +576,77 @@ export async function saveDiscordOnboardingSettings(formData: FormData) {
       vexUMemberRoleId,
       vexUMemberRoleName: vexUMemberRole.name,
     },
+  });
+  revalidatePath("/admin");
+}
+
+export async function saveDiscordDuesAccessSettings(formData: FormData) {
+  const actor = await requirePermission("dues.manage");
+  const guildId = required(formData, "guildId");
+  const enabled = formData.get("duesEnforcementEnabled") === "on";
+  const requestedChannelIds = [
+    ...new Set(
+      formData
+        .getAll("publicChannelId")
+        .map(String)
+        .filter((value) => /^\d{15,22}$/.test(value)),
+    ),
+  ];
+  const channelRows = requestedChannelIds.length
+    ? await getDb()
+        .select({ id: discordChannels.id, name: discordChannels.name })
+        .from(discordChannels)
+        .where(
+          and(
+            eq(discordChannels.guildId, guildId),
+            inArray(discordChannels.id, requestedChannelIds),
+          ),
+        )
+    : [];
+  if (channelRows.length !== requestedChannelIds.length) {
+    throw new Error("One or more selected public Discord channels are invalid.");
+  }
+  if (enabled && !channelRows.length) {
+    throw new Error(
+      "Select at least one public channel before enforcing membership dues.",
+    );
+  }
+  await getDb()
+    .update(discordGuilds)
+    .set({
+      duesEnforcementEnabled: enabled,
+      duesPublicChannelIds: requestedChannelIds,
+      updatedAt: new Date(),
+    })
+    .where(eq(discordGuilds.id, guildId));
+  const result = await syncDiscordDuesAccess({ guildId });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_MEMBERSHIP_DUES_SETTINGS",
+    entityType: "discord_guild",
+    entityId: guildId,
+    details: {
+      enabled,
+      publicChannels: channelRows,
+      paid: result.paid,
+      unpaid: result.unpaid,
+      exempt: result.exempt,
+      restrictedChannels: result.restricted,
+    },
+  });
+  revalidatePath("/admin");
+}
+
+export async function syncDiscordDuesAccessNow(formData: FormData) {
+  const actor = await requirePermission("dues.manage");
+  const guildId = required(formData, "guildId");
+  const result = await syncDiscordDuesAccess({ guildId });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_MEMBERSHIP_DUES_SYNC",
+    entityType: "discord_guild",
+    entityId: guildId,
+    details: result,
   });
   revalidatePath("/admin");
 }
@@ -1268,7 +1342,7 @@ export async function initializeMembershipDuesPeriod(formData: FormData) {
     .from(members)
     .where(eq(members.status, "ACTIVE"));
   if (activeMembers.length) {
-    await getDb()
+    const initialized = await getDb()
       .insert(membershipDues)
       .values(
         activeMembers.map((member) => ({
@@ -1287,7 +1361,11 @@ export async function initializeMembershipDuesPeriod(formData: FormData) {
           updatedByMemberId: actor.id,
           updatedAt: new Date(),
         },
-      });
+      })
+      .returning({ id: membershipDues.id });
+    for (const row of initialized) {
+      await recalculateMembershipDues(row.id);
+    }
   }
   await getDb().insert(auditEvents).values({
     actorMemberId: actor.id,
@@ -1304,7 +1382,7 @@ export async function saveMembershipDues(formData: FormData) {
   const memberId = required(formData, "memberId");
   const period = required(formData, "period");
   const amountDueCents = cents(formData, "amountDue");
-  const amountPaidCents = cents(formData, "amountPaid");
+  const manualAmountPaidCents = cents(formData, "amountPaid");
   const requestedStatus = required(formData, "status").toUpperCase();
   if (
     !membershipDuesStatuses.includes(
@@ -1315,7 +1393,7 @@ export async function saveMembershipDues(formData: FormData) {
   }
   const status = membershipDuesStatus({
     amountDueCents,
-    amountPaidCents,
+    amountPaidCents: manualAmountPaidCents,
     waived: requestedStatus === "WAIVED",
   });
   const dueAt = optionalDate(formData.get("dueAt"));
@@ -1330,7 +1408,8 @@ export async function saveMembershipDues(formData: FormData) {
       memberId,
       period,
       amountDueCents,
-      amountPaidCents,
+      manualAmountPaidCents,
+      amountPaidCents: manualAmountPaidCents,
       status,
       dueAt,
       paidAt: status === "PAID" ? now : null,
@@ -1343,7 +1422,8 @@ export async function saveMembershipDues(formData: FormData) {
       target: [membershipDues.memberId, membershipDues.period],
       set: {
         amountDueCents,
-        amountPaidCents,
+        manualAmountPaidCents,
+        amountPaidCents: manualAmountPaidCents,
         status,
         dueAt,
         paidAt: status === "PAID" ? now : null,
@@ -1354,6 +1434,15 @@ export async function saveMembershipDues(formData: FormData) {
       },
     })
     .returning();
+  const recalculated = await recalculateMembershipDues(saved.id);
+  try {
+    await syncDiscordDuesAccessForMember(memberId);
+  } catch (error) {
+    console.error("Discord dues access did not synchronize after manual update", {
+      memberId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   await getDb().insert(auditEvents).values({
     actorMemberId: actor.id,
     action: "MEMBERSHIP_DUES_UPDATE",
@@ -1363,8 +1452,9 @@ export async function saveMembershipDues(formData: FormData) {
       memberId,
       period,
       amountDueCents,
-      amountPaidCents,
-      status,
+      manualAmountPaidCents,
+      amountPaidCents: recalculated?.amountPaidCents ?? manualAmountPaidCents,
+      status: recalculated?.status ?? status,
     },
   });
   revalidatePath("/admin");

@@ -23,6 +23,7 @@ import {
   engineeringNotebookEntries,
   engineeringParts,
   manufacturingSteps,
+  membershipDues,
   designChanges,
   operationsHubRecords,
   scoutingMatches,
@@ -51,6 +52,8 @@ import { ScoutingPortal } from "@/components/scouting-portal";
 import { PortalSearch } from "@/components/portal-search";
 import { MemberEngineeringHub } from "@/components/member-engineering-hub";
 import { AccountConnections } from "@/components/account-connections";
+import { MembershipDuesCheckout } from "@/components/membership-dues-checkout";
+import { currentMembershipPeriod } from "@/lib/membership-dues";
 import {
   normalizePortalTab,
   portalLoadPlan,
@@ -371,6 +374,18 @@ export default async function PortalPage({
       .orderBy(desc(designChanges.updatedAt))
       : Promise.resolve([]),
   ]);
+  const [currentDues] = load.dues
+    ? await getDb()
+        .select()
+        .from(membershipDues)
+        .where(
+          and(
+            eq(membershipDues.memberId, member.id),
+            eq(membershipDues.period, currentMembershipPeriod()),
+          ),
+        )
+        .limit(1)
+    : [];
   const completedPolls = completedPollRows.filter(
     ({ poll }, index, rows) =>
       rows.findIndex((candidate) => candidate.poll.id === poll.id) === index,
@@ -513,6 +528,11 @@ export default async function PortalPage({
               href: "/portal?tab=engineering",
             },
             {
+              value: "dues",
+              label: "Membership dues",
+              href: "/portal?tab=dues",
+            },
+            {
               value: "glossary",
               label: "Glossary",
               href: "/portal?tab=glossary",
@@ -530,6 +550,27 @@ export default async function PortalPage({
             },
           ]}
         />
+        {tab === "dues" &&
+          (currentDues ? (
+            <MembershipDuesCheckout
+              duesId={currentDues.id}
+              period={currentDues.period}
+              amountDueCents={currentDues.amountDueCents}
+              amountPaidCents={currentDues.amountPaidCents}
+              status={currentDues.status}
+              dueAt={currentDues.dueAt?.toISOString() ?? null}
+              publishableKey={process.env.STRIPE_PUBLISHABLE_KEY ?? ""}
+            />
+          ) : (
+            <section className="card p-6 sm:p-8">
+              <p className="eyebrow">Membership dues</p>
+              <h2 className="mt-3 text-2xl font-bold">No balance assigned</h2>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-[#999]">
+                No dues record has been created for your account for the current
+                membership period. Contact an officer if you expected a balance.
+              </p>
+            </section>
+          ))}
         {tab === "engineering" && (
           <MemberEngineeringHub
             notebook={memberNotebookRows}

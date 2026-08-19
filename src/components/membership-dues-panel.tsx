@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
+import Link from "next/link";
 import { getDb } from "@/db";
-import { membershipDues, members } from "@/db/schema";
+import { discordGuilds, membershipDues, members } from "@/db/schema";
 import {
   initializeMembershipDuesPeriod,
   saveMembershipDues,
@@ -33,21 +34,29 @@ export async function MembershipDuesPanel({
   const safePeriod = /^\d{4}-\d{4}$/.test(period)
     ? period
     : currentMembershipPeriod();
-  const rows = await getDb()
-    .select({
-      member: members,
-      dues: membershipDues,
-    })
-    .from(members)
-    .leftJoin(
-      membershipDues,
-      and(
-        eq(membershipDues.memberId, members.id),
-        eq(membershipDues.period, safePeriod),
-      ),
-    )
-    .where(eq(members.status, "ACTIVE"))
-    .orderBy(asc(members.displayName));
+  const [rows, guildRows] = await Promise.all([
+    getDb()
+      .select({
+        member: members,
+        dues: membershipDues,
+      })
+      .from(members)
+      .leftJoin(
+        membershipDues,
+        and(
+          eq(membershipDues.memberId, members.id),
+          eq(membershipDues.period, safePeriod),
+        ),
+      )
+      .where(eq(members.status, "ACTIVE"))
+      .orderBy(asc(members.displayName)),
+    getDb()
+      .select()
+      .from(discordGuilds)
+      .orderBy(discordGuilds.updatedAt)
+      .limit(1),
+  ]);
+  const guild = guildRows[0] ?? null;
   const totalDue = rows.reduce(
     (total, row) => total + (row.dues?.amountDueCents ?? 0),
     0,
@@ -100,6 +109,27 @@ export async function MembershipDuesPanel({
         <Metric value={dollars(totalPaid)} label="Collected" />
         <Metric value={dollars(outstanding)} label="Outstanding" />
       </div>
+
+      {guild && (
+        <div className="mt-5 flex flex-col gap-4 border border-[#343434] bg-[#0d0d0d] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <strong className="text-sm text-white">
+              Discord access: {guild.duesEnforcementEnabled ? "payment enforcement on" : "transition mode"}
+            </strong>
+            <p className="mt-1 text-xs leading-5 text-[#888]">
+              {guild.duesEnforcementEnabled
+                ? "Paid and waived updates automatically refresh the linked member's Discord role."
+                : "Dues are tracked, but nobody is restricted while the transition toggle is off."}
+            </p>
+          </div>
+          <Link
+            className="button secondary shrink-0 justify-center"
+            href="/admin?tab=discord#discord-dues-access"
+          >
+            Configure Discord access
+          </Link>
+        </div>
+      )}
 
       <details className="mt-7 border border-[#343434] bg-[#0d0d0d]">
         <summary className="cursor-pointer px-5 py-4 font-semibold text-white">
@@ -186,7 +216,7 @@ export async function MembershipDuesPanel({
                 />
               </label>
               <label className="field">
-                <span>Amount received</span>
+                <span>Manual / non-Stripe amount received</span>
                 <input
                   className="input"
                   name="amountPaid"
@@ -194,9 +224,13 @@ export async function MembershipDuesPanel({
                   min="0"
                   max="100000"
                   step="0.01"
-                  defaultValue={(dues?.amountPaidCents ?? 0) / 100}
+                  defaultValue={(dues?.manualAmountPaidCents ?? 0) / 100}
                   required
                 />
+                <small className="text-xs leading-5 text-[#777]">
+                  Stripe payments are added automatically and should not be
+                  entered here again.
+                </small>
               </label>
               <label className="field">
                 <span>Status</span>
@@ -264,4 +298,3 @@ function Metric({ value, label }: { value: string; label: string }) {
     </div>
   );
 }
-

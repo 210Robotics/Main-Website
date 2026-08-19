@@ -2037,6 +2037,16 @@ export const discordGuilds = pgTable("discord_guilds", {
     .default(10),
   agreedRoleId: text("agreed_role_id"),
   vexUMemberRoleId: text("vex_u_member_role_id"),
+  duesEnforcementEnabled: boolean("dues_enforcement_enabled")
+    .notNull()
+    .default(false),
+  duesPaidRoleId: text("dues_paid_role_id"),
+  duesUnpaidRoleId: text("dues_unpaid_role_id"),
+  duesPublicChannelIds: jsonb("dues_public_channel_ids")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  duesLastSyncedAt: timestamp("dues_last_synced_at", { withTimezone: true }),
   installedByDiscordUserId: text("installed_by_discord_user_id"),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -2317,6 +2327,9 @@ export const membershipDues = pgTable(
       .references(() => members.id, { onDelete: "cascade" }),
     period: text("period").notNull(),
     amountDueCents: integer("amount_due_cents").notNull().default(0),
+    manualAmountPaidCents: integer("manual_amount_paid_cents")
+      .notNull()
+      .default(0),
     amountPaidCents: integer("amount_paid_cents").notNull().default(0),
     status: text("status").notNull().default("DUE"),
     dueAt: timestamp("due_at", { withTimezone: true }),
@@ -2341,5 +2354,40 @@ export const membershipDues = pgTable(
     ),
     index("membership_dues_period_status_idx").on(table.period, table.status),
     index("membership_dues_member_idx").on(table.memberId),
+  ],
+);
+
+export const membershipDuesPayments = pgTable(
+  "membership_dues_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    membershipDuesId: uuid("membership_dues_id")
+      .notNull()
+      .references(() => membershipDues.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" }),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id")
+      .notNull()
+      .unique(),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    amountCents: integer("amount_cents").notNull(),
+    refundedCents: integer("refunded_cents").notNull().default(0),
+    currency: text("currency").notNull().default("usd"),
+    status: text("status").notNull().default("PENDING"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("membership_dues_payment_dues_idx").on(table.membershipDuesId),
+    index("membership_dues_payment_member_idx").on(table.memberId),
+    index("membership_dues_payment_intent_idx").on(
+      table.stripePaymentIntentId,
+    ),
   ],
 );

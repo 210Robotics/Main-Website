@@ -25,6 +25,7 @@ import {
   postDiscordRecordingPolicy,
   processDiscordOnboardingNow,
   retryDiscordOnboardingRoles,
+  saveDiscordDuesAccessSettings,
   saveDiscordOnboardingSettings,
   saveDiscordSettings,
   saveDiscordReactionSettings,
@@ -35,6 +36,7 @@ import {
   sendMonthlyCalendarDigestNow,
   syncDiscordNow,
   syncDiscordMessagesNow,
+  syncDiscordDuesAccessNow,
   updateDiscordChannelSlowmode,
   updateDiscordMemberDmSettings,
   updateDiscordMemberTimeout,
@@ -53,6 +55,7 @@ import { requirePermission } from "@/lib/auth";
 import {
   checkDiscordGuildAccess,
   discordConfiguration,
+  inferDiscordDuesPublicChannelIds,
   listDiscordGuildRoles,
   listDiscordVoiceChannels,
 } from "@/lib/discord";
@@ -331,6 +334,14 @@ export async function DiscordAdminPanel({
   ).length;
   const onboardingRoleIssues = discordMembers.filter(
     ({ discord }) => Boolean(discord.onboardingRoleError),
+  );
+  const duesChannelOptions = channelRows.filter(
+    (channel) => [0, 2, 5, 13, 15].includes(channel.type) && !channel.archived,
+  );
+  const selectedDuesPublicChannelIds = new Set(
+    guild?.duesPublicChannelIds.length
+      ? guild.duesPublicChannelIds
+      : inferDiscordDuesPublicChannelIds(duesChannelOptions),
   );
 
   return (
@@ -625,6 +636,110 @@ export async function DiscordAdminPanel({
           </p>
         </div>
       </div>
+
+      {guild && (
+        <div
+          className="mt-7 scroll-mt-28 border border-[#343434] bg-[#0d0d0d] p-5 sm:p-6"
+          id="discord-dues-access"
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[.12em] text-[#fd7803]">
+                Membership dues + Discord permissions
+              </p>
+              <h3 className="mt-3 text-xl font-bold">Paid member access</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
+                In transition mode, dues do not change channel access. When
+                enforcement is enabled, the bot creates Membership Paid and
+                Membership Not Paid roles, keeps the selected public channels
+                visible, and hides other channels from unpaid members.
+                Administrators, officers, directors, leads, and bots are always
+                exempt.
+              </p>
+            </div>
+            <span
+              className={
+                guild.duesEnforcementEnabled
+                  ? "tag border-emerald-700 text-emerald-300"
+                  : "tag border-blue-700 text-blue-300"
+              }
+            >
+              {guild.duesEnforcementEnabled
+                ? "Payment enforcement on"
+                : "Transition mode"}
+            </span>
+          </div>
+
+          <ActionForm
+            action={saveDiscordDuesAccessSettings}
+            successMessage="Membership access settings saved and Discord roles synchronized."
+            className="mt-6 grid gap-5"
+          >
+            <input type="hidden" name="guildId" value={guild.id} />
+            <label className="flex items-start gap-3 border border-[#343434] bg-black/30 p-4 text-sm leading-6 text-[#bbb]">
+              <input
+                className="mt-1.5"
+                type="checkbox"
+                name="duesEnforcementEnabled"
+                defaultChecked={guild.duesEnforcementEnabled}
+              />
+              <span>
+                <strong className="block text-white">
+                  Require paid or waived dues for private Discord channels
+                </strong>
+                Leave this off during a transition period. Turning it off
+                removes the payment restriction from members without changing
+                officer or server permissions.
+              </span>
+            </label>
+            <fieldset>
+              <legend className="text-sm font-semibold text-white">
+                Channels everyone can still access
+              </legend>
+              <p className="mt-2 text-xs leading-5 text-[#777]">
+                General and announcements are selected automatically the first
+                time. Review this list before turning enforcement on.
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {duesChannelOptions.map((channel) => (
+                  <label
+                    className="flex min-w-0 items-center gap-3 border border-[#303030] bg-[#111] p-3 text-sm text-[#bbb]"
+                    key={channel.id}
+                  >
+                    <input
+                      type="checkbox"
+                      name="publicChannelId"
+                      value={channel.id}
+                      defaultChecked={selectedDuesPublicChannelIds.has(channel.id)}
+                    />
+                    <span className="truncate">#{channel.name}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button className="button justify-center">
+                Save and apply access rules
+              </button>
+            </div>
+          </ActionForm>
+          <ActionForm
+            action={syncDiscordDuesAccessNow}
+            successMessage="Discord membership access synchronized."
+            className="mt-3"
+          >
+            <input type="hidden" name="guildId" value={guild.id} />
+            <button className="button secondary w-full justify-center sm:w-auto">
+              Recheck every member now
+            </button>
+          </ActionForm>
+          <p className="mt-4 text-xs leading-5 text-[#777]">
+            Last synchronized: {formatDate(guild.duesLastSyncedAt)}. Stripe
+            payments, waivers, manual dues updates, and newly linked Discord
+            accounts also trigger a member-level access check automatically.
+          </p>
+        </div>
+      )}
 
       {guild && (
         <div

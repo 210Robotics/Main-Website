@@ -2667,6 +2667,21 @@ function EngineeringWorkspace({
           Export manufacturing workbook
         </a>
       </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[
+          ["1", "Add the part", "Enter a part number, name, quantity, and make-or-buy choice."],
+          ["2", "Add build steps", "For made parts, add the manufacturing operations in order."],
+          ["3", "Verify and release", "Attach the drawing or CAD link, inspect it, and mark it ready."],
+        ].map(([number, title, copy]) => (
+          <div className="border border-[#333] bg-[#101010] p-4" key={number}>
+            <span className="grid h-8 w-8 place-items-center bg-[#fd7803] font-black text-black">
+              {number}
+            </span>
+            <strong className="mt-3 block text-sm text-white">{title}</strong>
+            <p className="mt-1 text-xs leading-5 text-[#777]">{copy}</p>
+          </div>
+        ))}
+      </div>
       <OnshapeBomImporter
         seasons={seasons.map((season) => ({ id: season.id, label: season.name, isDefault: season.isDefault }))}
         projects={projects.map((project) => ({ id: project.id, label: `${project.code} · ${project.name}` }))}
@@ -2794,6 +2809,11 @@ function EngineeringWorkspace({
                           selectedPartId={part.id}
                           parts={parts}
                           members={people}
+                          defaultSequence={
+                            routers.length
+                              ? Math.max(...routers.map((step) => step.sequence)) + 10
+                              : 10
+                          }
                         />
                       </div>
                     </div>
@@ -3130,11 +3150,13 @@ function ManufacturingForm({
   parts,
   members: people,
   selectedPartId,
+  defaultSequence = 10,
 }: {
   step?: Row<"steps">;
   parts: Row<"parts">[];
   members: Person[];
   selectedPartId?: string;
+  defaultSequence?: number;
 }) {
   return (
     <ActionForm
@@ -3167,7 +3189,7 @@ function ManufacturingForm({
             type="number"
             min="1"
             step="10"
-            defaultValue={step?.sequence ?? 10}
+            defaultValue={step?.sequence ?? defaultSequence}
           />
         </Field>
         <Field label="Process">

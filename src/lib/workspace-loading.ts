@@ -9,6 +9,7 @@ export const portalTabs = [
   "templates",
   "scouting",
   "engineering",
+  "dues",
   "connections",
   "glossary",
 ] as const;
@@ -43,6 +44,7 @@ export function portalLoadPlan(tab: PortalTab) {
     portfolioNotebook: tab === "portfolio",
     portfolioDesign: tab === "portfolio",
     engineering: tab === "engineering",
+    dues: tab === "dues",
   };
 }
 

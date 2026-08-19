@@ -6,6 +6,7 @@ import {
   sendDiscordCalendarReminders,
   sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminders,
+  syncDiscordDuesAccess,
   syncDiscordGuild,
   syncDiscordMessages,
 } from "@/lib/discord";
@@ -48,6 +49,10 @@ export async function GET(request: NextRequest) {
           limit: 100,
         }),
       ]);
+    const duesAccess = await syncDiscordDuesAccess({
+      guildId: result.guildId,
+      configureChannels: false,
+    });
     return NextResponse.json({
       skipped: false,
       ...result,
@@ -57,6 +62,7 @@ export async function GET(request: NextRequest) {
       monthlyDigest,
       registrationDms,
       onboarding,
+      duesAccess,
     });
   } catch (error) {
     console.error("Scheduled Discord synchronization failed", error);

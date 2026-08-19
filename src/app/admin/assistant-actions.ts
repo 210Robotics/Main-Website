@@ -800,7 +800,7 @@ export async function executeAssistantCommand(input: {
       status: imported.status === "success" ? "success" : "error",
       message: [
         imported.message,
-        ...(imported.details ?? []).map((detail) => `â€¢ ${detail}`),
+        ...(imported.details ?? []).map((detail) => `• ${detail}`),
       ].join("\n"),
       href: imported.documentId
         ? "/admin?tab=documents"
@@ -2020,7 +2020,7 @@ export async function processAssistantDocument(
           importedCount += result.imported;
           skippedCount += parsed.skipped + result.skipped;
           details.push(
-            `Finance: ${resolvedPlan.created ? `created budget plan â€œ${resolvedPlan.plan.name}â€ and ` : ""}added ${result.imported} row${result.imported === 1 ? "" : "s"} from ${sheet.name} to ${resolvedPlan.plan.name}${result.skipped ? `; skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}.`,
+            `Finance: ${resolvedPlan.created ? `created budget plan “${resolvedPlan.plan.name}” and ` : ""}added ${result.imported} row${result.imported === 1 ? "" : "s"} from ${sheet.name} to ${resolvedPlan.plan.name}${result.skipped ? `; skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}.`,
           );
         } catch (error) {
           details.push(

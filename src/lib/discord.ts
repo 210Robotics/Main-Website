@@ -24,6 +24,8 @@ import {
   discordGuilds,
   discordLinkTokens,
   discordMessages,
+  membershipDues,
+  members,
 } from "@/db/schema";
 import { refreshCalendarEvents } from "@/lib/calendar";
 import {
@@ -35,6 +37,7 @@ import {
   inferDiscordOnboardingRoleIds,
   type DiscordRoleOption,
 } from "@/lib/discord-role-selection";
+import { currentMembershipPeriod } from "@/lib/membership-dues";
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -75,6 +78,7 @@ type DiscordRole = {
   name: string;
   position: number;
   managed: boolean;
+  permissions?: string;
 };
 
 type DiscordMessage = {
@@ -251,6 +255,347 @@ export async function upsertDiscordGuild({
           : {}),
       },
     });
+}
+
+const DISCORD_VIEW_CHANNEL_PERMISSION = "1024";
+const DISCORD_ADMINISTRATOR_PERMISSION = 8;
+const DUES_PAID_ROLE_NAME = "Membership Paid";
+const DUES_UNPAID_ROLE_NAME = "Membership Not Paid";
+const DUES_CHANNEL_TYPES = new Set([0, 2, 5, 13, 15]);
+
+function normalizedDiscordName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export function inferDiscordDuesPublicChannelIds(
+  channels: Array<{ id: string; name: string; type: number }>,
+) {
+  return channels
+    .filter((channel) => {
+      if (!DUES_CHANNEL_TYPES.has(channel.type)) return false;
+      const name = normalizedDiscordName(channel.name);
+      return (
+        name === "general" ||
+        name === "main general" ||
+        name === "announcements" ||
+        name === "main announcements"
+      );
+    })
+    .map((channel) => channel.id);
+}
+
+async function createDiscordGuildRole({
+  guildId,
+  name,
+  color,
+}: {
+  guildId: string;
+  name: string;
+  color: number;
+}) {
+  return discordFetch<DiscordRole>(`/guilds/${guildId}/roles`, {
+    method: "POST",
+    headers: {
+      "X-Audit-Log-Reason": encodeURIComponent(
+        "210 Robotics membership dues access",
+      ),
+    },
+    body: JSON.stringify({
+      name,
+      color,
+      hoist: false,
+      mentionable: false,
+      permissions: "0",
+    }),
+  });
+}
+
+async function ensureDiscordDuesRoles(guildId: string) {
+  const [[guild], roles] = await Promise.all([
+    getDb()
+      .select()
+      .from(discordGuilds)
+      .where(eq(discordGuilds.id, guildId))
+      .limit(1),
+    discordFetch<DiscordRole[]>(`/guilds/${guildId}/roles`),
+  ]);
+  if (!guild) throw new Error("The connected Discord server was not found.");
+
+  const roleById = new Map(roles.map((role) => [role.id, role]));
+  let paidRole = guild.duesPaidRoleId
+    ? roleById.get(guild.duesPaidRoleId)
+    : undefined;
+  let unpaidRole = guild.duesUnpaidRoleId
+    ? roleById.get(guild.duesUnpaidRoleId)
+    : undefined;
+  paidRole ??= roles.find(
+    (role) => role.name.toLowerCase() === DUES_PAID_ROLE_NAME.toLowerCase(),
+  );
+  unpaidRole ??= roles.find(
+    (role) => role.name.toLowerCase() === DUES_UNPAID_ROLE_NAME.toLowerCase(),
+  );
+  paidRole ??= await createDiscordGuildRole({
+    guildId,
+    name: DUES_PAID_ROLE_NAME,
+    color: 0xfd7803,
+  });
+  unpaidRole ??= await createDiscordGuildRole({
+    guildId,
+    name: DUES_UNPAID_ROLE_NAME,
+    color: 0x6b7280,
+  });
+  await getDb()
+    .update(discordGuilds)
+    .set({
+      duesPaidRoleId: paidRole.id,
+      duesUnpaidRoleId: unpaidRole.id,
+      updatedAt: new Date(),
+    })
+    .where(eq(discordGuilds.id, guildId));
+  return { paidRole, unpaidRole, roles: [...roles, paidRole, unpaidRole] };
+}
+
+function memberIsDuesExempt({
+  accessRole,
+  organizationRole,
+  discordRoleIds,
+  roles,
+}: {
+  accessRole: string | null;
+  organizationRole: string | null;
+  discordRoleIds: string[];
+  roles: DiscordRole[];
+}) {
+  if (
+    accessRole &&
+    (accessRole.includes("ADMIN") ||
+      accessRole.includes("LEAD") ||
+      ["OFFICER", "DIRECTOR"].includes(accessRole))
+  ) {
+    return true;
+  }
+  if (/\b(admins?|administrators?|officers?|directors?|leads?)\b/i.test(organizationRole || "")) {
+    return true;
+  }
+  const roleById = new Map(roles.map((role) => [role.id, role]));
+  return discordRoleIds.some((roleId) => {
+    const role = roleById.get(roleId);
+    if (!role) return false;
+    const permissions = Number(role.permissions || "0");
+    return (
+      (permissions & DISCORD_ADMINISTRATOR_PERMISSION) !== 0 ||
+      /\b(admins?|administrators?|officers?|directors?|leads?|bots?)\b/i.test(role.name)
+    );
+  });
+}
+
+async function setDiscordDuesChannelAccess({
+  guildId,
+  unpaidRoleId,
+  enabled,
+  publicChannelIds,
+}: {
+  guildId: string;
+  unpaidRoleId: string;
+  enabled: boolean;
+  publicChannelIds: string[];
+}) {
+  const channels = await getDb()
+    .select()
+    .from(discordChannels)
+    .where(eq(discordChannels.guildId, guildId));
+  const publicIds = new Set(publicChannelIds);
+  let restricted = 0;
+  for (const channel of channels) {
+    if (!DUES_CHANNEL_TYPES.has(channel.type) || channel.archived) continue;
+    const shouldRestrict = enabled && !publicIds.has(channel.id);
+    await discordFetch(
+      `/channels/${channel.id}/permissions/${unpaidRoleId}`,
+      {
+        method: "PUT",
+        headers: {
+          "X-Audit-Log-Reason": encodeURIComponent(
+            enabled
+              ? "210 Robotics membership dues access enabled"
+              : "210 Robotics membership dues access paused",
+          ),
+        },
+        body: JSON.stringify({
+          type: 0,
+          allow: "0",
+          deny: shouldRestrict ? DISCORD_VIEW_CHANNEL_PERMISSION : "0",
+        }),
+      },
+    );
+    if (shouldRestrict) restricted += 1;
+  }
+  return { restricted, inspected: channels.length };
+}
+
+export async function syncDiscordDuesAccess({
+  guildId,
+  linkedMemberId,
+  discordUserId,
+  configureChannels = true,
+}: {
+  guildId: string;
+  linkedMemberId?: string;
+  discordUserId?: string;
+  configureChannels?: boolean;
+}) {
+  const [guild] = await getDb()
+    .select()
+    .from(discordGuilds)
+    .where(eq(discordGuilds.id, guildId))
+    .limit(1);
+  if (!guild) throw new Error("The connected Discord server was not found.");
+  const roleState = await ensureDiscordDuesRoles(guildId);
+  const period = currentMembershipPeriod();
+  const memberRows = await getDb()
+    .select({
+      discord: discordGuildMembers,
+      accessRole: members.accessRole,
+      organizationRole: members.organizationRole,
+      memberStatus: members.status,
+      duesStatus: membershipDues.status,
+      amountDueCents: membershipDues.amountDueCents,
+      amountPaidCents: membershipDues.amountPaidCents,
+    })
+    .from(discordGuildMembers)
+    .leftJoin(members, eq(members.id, discordGuildMembers.linkedMemberId))
+    .leftJoin(
+      membershipDues,
+      and(
+        eq(membershipDues.memberId, discordGuildMembers.linkedMemberId),
+        eq(membershipDues.period, period),
+      ),
+    )
+    .where(
+      and(
+        eq(discordGuildMembers.guildId, guildId),
+        eq(discordGuildMembers.isBot, false),
+        isNull(discordGuildMembers.leftAt),
+        linkedMemberId
+          ? eq(discordGuildMembers.linkedMemberId, linkedMemberId)
+          : discordUserId
+            ? eq(discordGuildMembers.discordUserId, discordUserId)
+            : undefined,
+      ),
+    );
+
+  const enabled = guild.duesEnforcementEnabled;
+  let paid = 0;
+  let unpaid = 0;
+  let exempt = 0;
+  let changed = 0;
+  for (const row of memberRows) {
+    const currentRoles = new Set(row.discord.roles);
+    const isExempt = memberIsDuesExempt({
+      accessRole: row.accessRole,
+      organizationRole: row.organizationRole,
+      discordRoleIds: row.discord.roles,
+      roles: roleState.roles,
+    });
+    const isPaid =
+      row.memberStatus === "ACTIVE" &&
+      (row.duesStatus === "PAID" || row.duesStatus === "WAIVED") &&
+      (row.duesStatus === "WAIVED" ||
+        (row.amountDueCents ?? 0) > 0 &&
+          (row.amountPaidCents ?? 0) >= (row.amountDueCents ?? 0));
+    const desiredRoleId = !enabled || isExempt
+      ? null
+      : isPaid
+        ? roleState.paidRole.id
+        : roleState.unpaidRole.id;
+    for (const roleId of [roleState.paidRole.id, roleState.unpaidRole.id]) {
+      const shouldHave = desiredRoleId === roleId;
+      if (shouldHave === currentRoles.has(roleId)) continue;
+      await discordFetch(
+        `/guilds/${guildId}/members/${row.discord.discordUserId}/roles/${roleId}`,
+        {
+          method: shouldHave ? "PUT" : "DELETE",
+          headers: {
+            "X-Audit-Log-Reason": encodeURIComponent(
+              "210 Robotics membership dues synchronization",
+            ),
+          },
+        },
+      );
+      changed += 1;
+      if (shouldHave) currentRoles.add(roleId);
+      else currentRoles.delete(roleId);
+    }
+    await getDb()
+      .update(discordGuildMembers)
+      .set({ roles: [...currentRoles], updatedAt: new Date() })
+      .where(eq(discordGuildMembers.id, row.discord.id));
+    if (!enabled || isExempt) exempt += 1;
+    else if (isPaid) paid += 1;
+    else unpaid += 1;
+  }
+
+  let channelResult = { restricted: 0, inspected: 0 };
+  if (configureChannels) {
+    channelResult = await setDiscordDuesChannelAccess({
+      guildId,
+      unpaidRoleId: roleState.unpaidRole.id,
+      enabled,
+      publicChannelIds: guild.duesPublicChannelIds,
+    });
+  }
+  const now = new Date();
+  await getDb()
+    .update(discordGuilds)
+    .set({ duesLastSyncedAt: now, updatedAt: now })
+    .where(eq(discordGuilds.id, guildId));
+  await recordDiscordEvent({
+    guildId,
+    kind: "MEMBERSHIP_DUES_ACCESS_SYNCED",
+    metadata: {
+      enabled,
+      period,
+      paid,
+      unpaid,
+      exempt,
+      changed,
+      restrictedChannels: channelResult.restricted,
+    },
+  });
+  return {
+    enabled,
+    period,
+    paid,
+    unpaid,
+    exempt,
+    changed,
+    ...channelResult,
+    paidRoleId: roleState.paidRole.id,
+    unpaidRoleId: roleState.unpaidRole.id,
+  };
+}
+
+export async function syncDiscordDuesAccessForMember(memberId: string) {
+  const links = await getDb()
+    .select({ guildId: discordGuildMembers.guildId })
+    .from(discordGuildMembers)
+    .where(
+      and(
+        eq(discordGuildMembers.linkedMemberId, memberId),
+        eq(discordGuildMembers.isBot, false),
+        isNull(discordGuildMembers.leftAt),
+      ),
+    );
+  const results = [];
+  for (const link of links) {
+    results.push(
+      await syncDiscordDuesAccess({
+        guildId: link.guildId,
+        linkedMemberId: memberId,
+        configureChannels: false,
+      }),
+    );
+  }
+  return results;
 }
 
 export async function recordDiscordEvent({
@@ -1549,6 +1894,25 @@ export async function handleDiscordMemberJoined({
     .from(discordGuilds)
     .where(eq(discordGuilds.id, guildId))
     .limit(1);
+  if (guild?.duesEnforcementEnabled) {
+    try {
+      await syncDiscordDuesAccess({
+        guildId,
+        discordUserId: member.discordUserId,
+        configureChannels: false,
+      });
+    } catch (error) {
+      await recordDiscordEvent({
+        guildId,
+        discordUserId: member.discordUserId,
+        kind: "MEMBERSHIP_DUES_ACCESS_FAILED",
+        metadata: {
+          stage: "member-joined",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
   if (!guild?.onboardingEnabled) {
     return { sent: false, reason: "onboarding-disabled" };
   }
@@ -1747,6 +2111,11 @@ export async function completeDiscordLinkedOnboarding({
     const result = await assignDiscordOnboardingRoles({
       guildId: member.guildId,
       discordUserId: member.discordUserId,
+    });
+    await syncDiscordDuesAccess({
+      guildId: member.guildId,
+      linkedMemberId: member.linkedMemberId,
+      configureChannels: false,
     });
     await sendDiscordDirectMessage({
       discordUserId: member.discordUserId,
