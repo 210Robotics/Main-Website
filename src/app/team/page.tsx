@@ -4,21 +4,41 @@ import { getPublicPortalMembers, getRosterCards } from "@/lib/public-people";
 import { getWebsitePageContent } from "@/lib/site-content";
 export const metadata: Metadata = { title: "Team" };
 export const dynamic = "force-dynamic";
+
+function rosterKey(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export default async function Team() {
-  const [officers, contributors, advisors, portalMembers, content] = await Promise.all([
+  const [officerRows, contributorRows, advisorRows, portalMembers, content] = await Promise.all([
     getRosterCards("TEAM", "leadership"),
     getRosterCards("TEAM", "contributors"),
     getRosterCards("TEAM", "advisor"),
     getPublicPortalMembers(),
     getWebsitePageContent("team"),
   ]);
+  const officers = officerRows.filter(
+    (member, index, rows) =>
+      rows.findIndex((candidate) => rosterKey(candidate.name) === rosterKey(member.name)) === index,
+  );
+  const usedNames = new Set(officers.map((member) => rosterKey(member.name)));
+  const contributors = contributorRows.filter((member) => {
+    const key = rosterKey(member.name);
+    if (usedNames.has(key)) return false;
+    usedNames.add(key);
+    return true;
+  });
+  const advisors = advisorRows.filter((member) => {
+    const key = rosterKey(member.name);
+    if (usedNames.has(key)) return false;
+    usedNames.add(key);
+    return true;
+  });
   const featuredNames = new Set(
-    [...officers, ...contributors, ...advisors].map((member) =>
-      member.name.trim().toLowerCase().replace(/\s+/g, " "),
-    ),
+    [...officers, ...contributors, ...advisors].map((member) => rosterKey(member.name)),
   );
   const directoryOnly = portalMembers.filter(
-    (member) => !featuredNames.has(member.name.trim().toLowerCase().replace(/\s+/g, " ")),
+    (member) => !featuredNames.has(rosterKey(member.name)),
   );
   const mentors = directoryOnly.filter((member) => member.accessRole === "MENTOR");
   const members = directoryOnly.filter((member) => member.accessRole !== "MENTOR");
