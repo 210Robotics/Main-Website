@@ -86,7 +86,13 @@ async function verifyGemini() {
 }
 
 async function main() {
-  await verifyGemini();
+  await verifyGemini().catch((error: unknown) => {
+    console.warn(
+      `Gemini health check warning: ${
+        error instanceof Error ? error.message : "Gemini is unavailable."
+      }`,
+    );
+  });
   if (!token || !applicationId || !guildId) {
     console.log(
       "Discord command registration skipped because deployment credentials are not available.",
