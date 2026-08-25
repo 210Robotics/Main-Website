@@ -1,6 +1,6 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import type { NextRequest } from "next/server";
-import { requireActiveMember } from "@/lib/auth";
+import { requireMemberEntitlement } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { allowedImageTypes, MAX_IMAGE_BYTES } from "@/lib/upload-policy";
 import { allowedFormFileTypes, MAX_FORM_FILE_BYTES } from "@/lib/form-files";
@@ -64,7 +64,7 @@ function isPurpose(value: unknown): value is UploadPurpose {
 }
 
 async function authorizePurpose(purpose: UploadPurpose, taskId?: string) {
-  const member = await requireActiveMember();
+  const member = await requireMemberEntitlement();
   if (purpose === "self-profile") return member;
   if (purpose === "internal-document") {
     if (!hasPermission(member.accessRole, "documents.manage", member.permissionOverrides))

@@ -218,6 +218,20 @@
       "when": 1787150698508,
       "tag": "0030_watery_zzzax",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787677295642,
+      "tag": "0031_square_tyger_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787678275211,
+      "tag": "0032_cloudy_sersi",
+      "breakpoints": true
     }
   ]
 }

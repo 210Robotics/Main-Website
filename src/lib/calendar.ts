@@ -57,6 +57,12 @@ function valueFor(lines: string[], name: string) {
   return line ? line.slice(line.indexOf(":") + 1) : "";
 }
 
+function valuesFor(lines: string[], name: string) {
+  return lines
+    .filter((entry) => entry.startsWith(`${name}:`) || entry.startsWith(`${name};`))
+    .flatMap((line) => line.slice(line.indexOf(":") + 1).split(","));
+}
+
 function occurrences(start: Date, rule: string, windowEnd: Date) {
   if (!rule) return [start];
   const values = Object.fromEntries(rule.split(";").map((part) => part.split("=", 2)));
@@ -92,6 +98,7 @@ async function getGoogleCalendarEvents(forceRefresh = false): Promise<CalendarEv
   const events: CalendarEvent[] = [];
 
   for (const lines of blocks) {
+    if (valueFor(lines, "STATUS").toUpperCase() === "CANCELLED") continue;
     const startLine = lines.find((line) => line.startsWith("DTSTART"));
     const endLine = lines.find((line) => line.startsWith("DTEND"));
     if (!startLine || !endLine) continue;
@@ -100,7 +107,13 @@ async function getGoogleCalendarEvents(forceRefresh = false): Promise<CalendarEv
     if (!parsedStart || !parsedEnd) continue;
     const duration = parsedEnd.date.getTime() - parsedStart.date.getTime();
     const uid = unescapeIcs(valueFor(lines, "UID"));
+    const exclusions = new Set(
+      valuesFor(lines, "EXDATE")
+        .map((value) => parseDate(`DTSTART:${value}`)?.date.toISOString())
+        .filter((value): value is string => Boolean(value)),
+    );
     for (const start of occurrences(parsedStart.date, valueFor(lines, "RRULE"), windowEnd)) {
+      if (exclusions.has(start.toISOString())) continue;
       const end = new Date(start.getTime() + duration);
       if (end < windowStart || start > windowEnd) continue;
       events.push({
@@ -126,8 +139,27 @@ export async function getCalendarEvents(): Promise<CalendarEvent[]> {
     return [...googleEvents, ...teamEvents].sort((a, b) => a.start.localeCompare(b.start));
   } catch (error) {
     console.error("Calendar sync failed", error);
+    if (hasDatabase()) {
+      const [snapshot] = await getDb()
+        .select({ events: calendarSnapshots.events })
+        .from(calendarSnapshots)
+        .where(eq(calendarSnapshots.id, "shared"))
+        .limit(1);
+      const cached = Array.isArray(snapshot?.events)
+        ? (snapshot.events as CalendarEvent[])
+        : [];
+      return [...cached, ...teamEvents].sort((a, b) => a.start.localeCompare(b.start));
+    }
     return teamEvents;
   }
+}
+
+export async function getUpcomingCalendarEvents(limit?: number) {
+  const now = Date.now();
+  const events = (await getCalendarEvents()).filter(
+    (event) => new Date(event.end || event.start).getTime() >= now,
+  );
+  return typeof limit === "number" ? events.slice(0, limit) : events;
 }
 
 export async function refreshCalendarEvents() {

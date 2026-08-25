@@ -2,7 +2,7 @@ import { get } from "@vercel/blob";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { internalDocuments } from "@/db/schema";
-import { requireActiveMember } from "@/lib/auth";
+import { requireMemberEntitlement } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { safeDocumentName } from "@/lib/internal-documents";
 import { privateBlobToken } from "@/lib/private-blob";
@@ -14,7 +14,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const actor = await requireActiveMember();
+  const actor = await requireMemberEntitlement();
   if (
     !hasPermission(
       actor.accessRole,

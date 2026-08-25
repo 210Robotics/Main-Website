@@ -3,6 +3,7 @@ export const membershipDuesStatuses = [
   "PARTIAL",
   "PAID",
   "WAIVED",
+  "WAIVED_FUNDRAISING",
 ] as const;
 
 export type MembershipDuesStatus = (typeof membershipDuesStatuses)[number];
@@ -27,4 +28,3 @@ export function membershipDuesStatus({
   if (amountPaidCents > 0) return "PARTIAL";
   return "DUE";
 }
-

@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memberTasks } from "@/db/schema";
-import { requireActiveMember } from "@/lib/auth";
+import { requireMemberEntitlement } from "@/lib/auth";
 import { safeUploadFilename } from "@/lib/form-files";
 import { hasPermission } from "@/lib/permissions";
 
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const member = await requireActiveMember();
+    const member = await requireMemberEntitlement();
     const body = (await request.json()) as {
       taskId?: string;
       filename?: string;

@@ -39,6 +39,7 @@ import {
 } from "@/lib/media-policy";
 import { isMissingClerkUserError } from "@/lib/clerk-errors";
 import { refreshCalendarEvents } from "@/lib/calendar";
+import { runTrackedSyncJob } from "@/lib/sync-jobs";
 import {
   getWebsitePageDefinition,
   websiteContentKey,
@@ -111,6 +112,51 @@ export async function approveMember(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/members");
   revalidatePath("/team");
+}
+
+export async function grantUniversityEmailOverride(formData: FormData) {
+  const actor = await requirePermission("access.manage");
+  const data = z.object({
+    memberId: z.uuid(),
+    reason: z.string().trim().min(10).max(500),
+  }).parse(Object.fromEntries(formData));
+  const now = new Date();
+  await getDb().update(members).set({
+    universityEmailOverrideAt: now,
+    universityEmailOverrideByMemberId: actor.id,
+    universityEmailOverrideReason: data.reason,
+    accessStateUpdatedAt: now,
+    updatedAt: now,
+  }).where(eq(members.id, data.memberId));
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "MEMBER_UNIVERSITY_EMAIL_OVERRIDE_GRANTED",
+    entityType: "member",
+    entityId: data.memberId,
+    details: { reason: data.reason },
+  });
+  revalidatePath("/admin");
+  revalidatePath("/verify");
+}
+
+export async function revokeUniversityEmailOverride(formData: FormData) {
+  const actor = await requirePermission("access.manage");
+  const memberId = z.uuid().parse(formData.get("memberId"));
+  await getDb().update(members).set({
+    universityEmailOverrideAt: null,
+    universityEmailOverrideByMemberId: null,
+    universityEmailOverrideReason: null,
+    accessStateUpdatedAt: new Date(),
+    updatedAt: new Date(),
+  }).where(eq(members.id, memberId));
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "MEMBER_UNIVERSITY_EMAIL_OVERRIDE_REVOKED",
+    entityType: "member",
+    entityId: memberId,
+  });
+  revalidatePath("/admin");
+  revalidatePath("/verify");
 }
 
 export async function updateMemberAccess(
@@ -1488,7 +1534,12 @@ export async function refreshSharedCalendar(
   void _formData;
   const actor = await requirePermission("events.manage");
   try {
-    const result = await refreshCalendarEvents();
+    const result = await runTrackedSyncJob({
+      job: "GOOGLE_CALENDAR",
+      source: "MANUAL",
+      run: refreshCalendarEvents,
+      recordsChanged: (value) => value.count,
+    });
     await getDb()
       .insert(auditEvents)
       .values({

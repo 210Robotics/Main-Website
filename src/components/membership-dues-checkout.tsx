@@ -7,6 +7,7 @@ import {
 } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { CheckCircle2, CreditCard, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 function money(cents: number) {
@@ -23,6 +24,9 @@ export function MembershipDuesCheckout({
   amountPaidCents,
   status,
   dueAt,
+  fundraisingRaisedCents,
+  fundraisingThresholdCents,
+  payments,
   publishableKey,
 }: {
   duesId: string;
@@ -31,6 +35,17 @@ export function MembershipDuesCheckout({
   amountPaidCents: number;
   status: string;
   dueAt: string | null;
+  fundraisingRaisedCents: number;
+  fundraisingThresholdCents: number;
+  payments: Array<{
+    id: string;
+    amountCents: number;
+    paymentDate: string;
+    paymentMethod: string;
+    coveragePeriod: string;
+    status: string;
+    receiptNumber: string | null;
+  }>;
   publishableKey: string;
 }) {
   const router = useRouter();
@@ -43,7 +58,10 @@ export function MembershipDuesCheckout({
   const [complete, setComplete] = useState(false);
   const [message, setMessage] = useState("");
   const outstandingCents = Math.max(0, amountDueCents - amountPaidCents);
-  const settled = status === "PAID" || status === "WAIVED";
+  const settled = ["PAID", "WAIVED", "WAIVED_FUNDRAISING"].includes(status);
+  const waiverProgress = fundraisingThresholdCents > 0
+    ? Math.min(100, Math.round((fundraisingRaisedCents / fundraisingThresholdCents) * 100))
+    : 100;
   const payable = outstandingCents >= 50;
   const handleComplete = useCallback(() => {
     setComplete(true);
@@ -123,6 +141,16 @@ export function MembershipDuesCheckout({
         <Metric label="Received" value={money(amountPaidCents)} />
         <Metric label="Remaining" value={money(outstandingCents)} />
       </div>
+      <div className="mt-5 border border-[#333] bg-[#0d0d0d] p-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div><strong className="text-white">Fundraising waiver</strong><p className="mt-1 text-xs text-[#888]">Only finalized, member-attributed donations count.</p></div>
+          <span className="text-sm tabular-nums text-[#ddd]">{money(fundraisingRaisedCents)} / {money(fundraisingThresholdCents)}</span>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#262626]" role="progressbar" aria-label="Fundraising waiver progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={waiverProgress}>
+          <div className="h-full rounded-full bg-[#fd7803]" style={{ width: `${waiverProgress}%` }} />
+        </div>
+        <p className="mt-3 text-xs leading-5 text-[#999]">{status === "WAIVED_FUNDRAISING" ? "Yearly dues waived through fundraising." : `${money(Math.max(0, fundraisingThresholdCents - fundraisingRaisedCents))} more to waive yearly dues.`}</p>
+      </div>
 
       {clientSecret ? (
         <div className="mt-6 overflow-hidden bg-white py-2">
@@ -172,6 +200,20 @@ export function MembershipDuesCheckout({
           {message}
         </p>
       )}
+      <div className="mt-7 border-t border-[#333] pt-6">
+        <h3 className="text-lg font-bold">Payment history</h3>
+        {payments.length ? (
+          <div className="mt-4 grid gap-2">
+            {payments.map((payment) => (
+              <div className="grid gap-3 border border-[#333] p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center" key={payment.id}>
+                <div><strong>{money(payment.amountCents)}</strong><p className="mt-1 text-xs text-[#777]">{new Date(payment.paymentDate).toLocaleDateString("en-US", { dateStyle: "medium" })} · {payment.paymentMethod.replaceAll("_", " ")} · {payment.coveragePeriod}</p></div>
+                <span className="tag w-fit">{payment.status}</span>
+                {payment.status === "PAID" ? <Link className="button secondary min-h-10 justify-center" href={`/api/membership-dues/receipts/${payment.id}`}>Download receipt</Link> : <span />}
+              </div>
+            ))}
+          </div>
+        ) : <p className="mt-3 text-sm text-[#777]">No confirmed dues payments are on file yet.</p>}
+      </div>
     </section>
   );
 }

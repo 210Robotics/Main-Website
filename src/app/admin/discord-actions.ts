@@ -3,6 +3,7 @@
 import { and, eq, ilike, inArray, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { put } from "@vercel/blob";
 import { getDb } from "@/db";
 import {
   auditEvents,
@@ -10,6 +11,8 @@ import {
   discordGuildMembers,
   discordGuilds,
   membershipDues,
+  membershipDuesPayments,
+  membershipSettings,
   members,
 } from "@/db/schema";
 import { requirePermission } from "@/lib/auth";
@@ -44,6 +47,8 @@ import {
   membershipDuesStatuses,
 } from "@/lib/membership-dues";
 import { recalculateMembershipDues } from "@/lib/membership-dues-server";
+import { reconcileMemberMembership } from "@/lib/membership-access-server";
+import { privateBlobToken } from "@/lib/private-blob";
 import {
   speakDiscordVoiceMessage,
   stopAllDiscordVoiceRecordings,
@@ -1332,8 +1337,8 @@ export async function sendDiscordBroadcastReminder(formData: FormData) {
 export async function initializeMembershipDuesPeriod(formData: FormData) {
   const actor = await requirePermission("dues.manage");
   const period = required(formData, "period");
-  if (!/^\d{4}-\d{4}$/.test(period)) {
-    throw new Error("Period must look like 2026-2027.");
+  if (!/^[A-Za-z0-9][A-Za-z0-9 .-]{2,39}$/.test(period)) {
+    throw new Error("Enter a valid semester or academic-year period.");
   }
   const amountDueCents = cents(formData, "amountDue");
   const dueAt = optionalDate(formData.get("dueAt"));
@@ -1458,6 +1463,165 @@ export async function saveMembershipDues(formData: FormData) {
     },
   });
   revalidatePath("/admin");
+}
+
+export async function saveMembershipSettings(formData: FormData) {
+  const actor = await requirePermission("dues.manage");
+  const membershipYear = required(formData, "membershipYear");
+  if (!/^\d{4}-\d{4}$/.test(membershipYear)) {
+    throw new Error("Membership year must look like 2026-2027.");
+  }
+  const semesterDuesCents = cents(formData, "semesterDues");
+  const annualDuesCents = cents(formData, "annualDues");
+  const fundraisingWaiverThresholdCents = cents(formData, "fundraisingWaiverThreshold");
+  const gracePeriodDays = Math.max(0, Math.min(180, Number(formData.get("gracePeriodDays") || 0)));
+  const accessEnforcementEnabled = formData.get("accessEnforcementEnabled") === "on";
+  await getDb()
+    .insert(membershipSettings)
+    .values({
+      id: "membership",
+      membershipYear,
+      semesterDuesCents,
+      annualDuesCents,
+      fundraisingWaiverThresholdCents,
+      gracePeriodDays,
+      accessEnforcementEnabled,
+      updatedByMemberId: actor.id,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: membershipSettings.id,
+      set: {
+        membershipYear,
+        semesterDuesCents,
+        annualDuesCents,
+        fundraisingWaiverThresholdCents,
+        gracePeriodDays,
+        accessEnforcementEnabled,
+        updatedByMemberId: actor.id,
+        updatedAt: new Date(),
+      },
+    });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "MEMBERSHIP_SETTINGS_UPDATE",
+    entityType: "membership_settings",
+    entityId: "membership",
+    details: {
+      membershipYear,
+      semesterDuesCents,
+      annualDuesCents,
+      fundraisingWaiverThresholdCents,
+      gracePeriodDays,
+      accessEnforcementEnabled,
+    },
+  });
+  revalidatePath("/admin");
+  revalidatePath("/portal");
+}
+
+export async function addManualMembershipDuesPayment(formData: FormData) {
+  const actor = await requirePermission("dues.manage");
+  const memberId = required(formData, "memberId");
+  const period = required(formData, "period");
+  const amountCents = cents(formData, "amount");
+  if (amountCents <= 0) throw new Error("Payment amount must be greater than zero.");
+  const coverageType = required(formData, "coverageType").toUpperCase();
+  if (!["SEMESTER", "ANNUAL"].includes(coverageType)) {
+    throw new Error("Choose semester or annual coverage.");
+  }
+  const paymentMethod = required(formData, "paymentMethod").toUpperCase().slice(0, 80);
+  if (!["CASH", "CHECK", "UNIVERSITY_PAYMENT", "OTHER"].includes(paymentMethod)) {
+    throw new Error("Choose a valid manual payment method.");
+  }
+  const paymentDate = optionalDate(formData.get("paymentDate")) || new Date();
+  const transactionReference = String(formData.get("transactionReference") || "").trim().slice(0, 180);
+  const notes = String(formData.get("notes") || "").trim().slice(0, 2_000);
+  const proof = formData.get("proof");
+  let proofFields: {
+    proofPathname?: string;
+    proofFilename?: string;
+    proofMimeType?: string;
+    proofBytes?: number;
+  } = {};
+  if (proof instanceof File && proof.size > 0) {
+    const allowed = ["application/pdf", "image/jpeg", "image/png"];
+    if (!allowed.includes(proof.type) || proof.size > 8 * 1024 * 1024) {
+      throw new Error("Payment proof must be a PDF, JPG, or PNG under 8 MB.");
+    }
+    const safeName = proof.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 140);
+    const blob = await put(
+      `membership-dues/proof/${memberId}/${crypto.randomUUID()}-${safeName}`,
+      Buffer.from(await proof.arrayBuffer()),
+      { access: "private", token: privateBlobToken(), contentType: proof.type, addRandomSuffix: true },
+    );
+    proofFields = {
+      proofPathname: blob.pathname,
+      proofFilename: safeName,
+      proofMimeType: proof.type,
+      proofBytes: proof.size,
+    };
+  }
+  const [settings] = await getDb()
+    .select()
+    .from(membershipSettings)
+    .where(eq(membershipSettings.id, "membership"))
+    .limit(1);
+  const [dues] = await getDb()
+    .insert(membershipDues)
+    .values({
+      memberId,
+      period,
+      coverageType,
+      amountDueCents:
+        coverageType === "ANNUAL"
+          ? settings?.annualDuesCents ?? 5_000
+          : settings?.semesterDuesCents ?? 3_000,
+      updatedByMemberId: actor.id,
+    })
+    .onConflictDoUpdate({
+      target: [membershipDues.memberId, membershipDues.period],
+      set: { coverageType, updatedByMemberId: actor.id, updatedAt: new Date() },
+    })
+    .returning();
+  const receiptNumber = `210-${period.slice(0, 4)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+  const [payment] = await getDb()
+    .insert(membershipDuesPayments)
+    .values({
+      membershipDuesId: dues.id,
+      memberId,
+      paymentType: coverageType === "ANNUAL" ? "ANNUAL_DUES" : "SEMESTER_DUES",
+      coverageType,
+      coveragePeriod: period,
+      paymentMethod,
+      paymentDate,
+      transactionReference: transactionReference || null,
+      receiptNumber,
+      enteredByMemberId: actor.id,
+      notes,
+      ...proofFields,
+      amountCents,
+      status: "PAID",
+      paidAt: paymentDate,
+    })
+    .returning();
+  await recalculateMembershipDues(dues.id);
+  await reconcileMemberMembership(memberId);
+  await syncDiscordDuesAccessForMember(memberId).catch((error) => {
+    console.error("Discord access did not synchronize after manual payment", {
+      memberId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "MEMBERSHIP_DUES_PAYMENT_ADD",
+    entityType: "membership_dues_payment",
+    entityId: payment.id,
+    details: { memberId, period, amountCents, paymentMethod, receiptNumber },
+  });
+  revalidatePath("/admin");
+  revalidatePath("/portal");
 }
 
 export async function setDiscordGuildName(formData: FormData) {

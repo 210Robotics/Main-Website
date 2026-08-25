@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "discord_guild_member_linked_identity_idx" ON "discord_guild_members" USING btree ("guild_id","linked_member_id") WHERE "discord_guild_members"."linked_member_id" is not null;

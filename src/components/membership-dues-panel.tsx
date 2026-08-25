@@ -1,10 +1,12 @@
 import { and, asc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { getDb } from "@/db";
-import { discordGuilds, membershipDues, members } from "@/db/schema";
+import { discordGuilds, membershipDues, membershipPeriods, membershipSettings, members } from "@/db/schema";
 import {
+  addManualMembershipDuesPayment,
   initializeMembershipDuesPeriod,
   saveMembershipDues,
+  saveMembershipSettings,
 } from "@/app/admin/discord-actions";
 import { ActionForm } from "@/components/action-form";
 import { requirePermission } from "@/lib/auth";
@@ -31,10 +33,10 @@ export async function MembershipDuesPanel({
   period?: string;
 }) {
   await requirePermission("dues.manage");
-  const safePeriod = /^\d{4}-\d{4}$/.test(period)
+  const safePeriod = /^[A-Za-z0-9][A-Za-z0-9 .-]{2,39}$/.test(period)
     ? period
     : currentMembershipPeriod();
-  const [rows, guildRows] = await Promise.all([
+  const [rows, guildRows, settingsRows, periodRows] = await Promise.all([
     getDb()
       .select({
         member: members,
@@ -55,8 +57,26 @@ export async function MembershipDuesPanel({
       .from(discordGuilds)
       .orderBy(discordGuilds.updatedAt)
       .limit(1),
+    getDb()
+      .select()
+      .from(membershipSettings)
+      .where(eq(membershipSettings.id, "membership"))
+      .limit(1),
+    getDb()
+      .select()
+      .from(membershipPeriods)
+      .where(eq(membershipPeriods.isActive, true))
+      .orderBy(asc(membershipPeriods.startsAt)),
   ]);
   const guild = guildRows[0] ?? null;
+  const settings = settingsRows[0] ?? {
+    membershipYear: safePeriod,
+    semesterDuesCents: 3_000,
+    annualDuesCents: 5_000,
+    fundraisingWaiverThresholdCents: 10_000,
+    gracePeriodDays: 30,
+    accessEnforcementEnabled: false,
+  };
   const totalDue = rows.reduce(
     (total, row) => total + (row.dues?.amountDueCents ?? 0),
     0,
@@ -66,7 +86,7 @@ export async function MembershipDuesPanel({
     0,
   );
   const paidCount = rows.filter(
-    (row) => row.dues?.status === "PAID" || row.dues?.status === "WAIVED",
+    (row) => ["PAID", "WAIVED", "WAIVED_FUNDRAISING"].includes(row.dues?.status || ""),
   ).length;
   const outstanding = Math.max(0, totalDue - totalPaid);
 
@@ -89,9 +109,9 @@ export async function MembershipDuesPanel({
             <input
               className="input"
               name="period"
-              pattern="\d{4}-\d{4}"
+              pattern="[A-Za-z0-9][A-Za-z0-9 .-]{2,39}"
               defaultValue={safePeriod}
-              placeholder="2026-2027"
+              placeholder="2026-2027 or Fall 2026"
             />
           </label>
           <button className="button secondary justify-center sm:self-end">
@@ -109,6 +129,44 @@ export async function MembershipDuesPanel({
         <Metric value={dollars(totalPaid)} label="Collected" />
         <Metric value={dollars(outstanding)} label="Outstanding" />
       </div>
+      {!!periodRows.length && (
+        <nav className="mt-5 flex flex-wrap gap-2" aria-label="Membership periods">
+          {periodRows.map((item) => {
+            const value = item.coverageType === "ANNUAL" ? item.academicYear : item.label;
+            return (
+              <Link
+                className={`tag transition ${value === safePeriod ? "border-[#fd7803] text-white" : "hover:border-[#777]"}`}
+                href={`/admin?tab=dues&period=${encodeURIComponent(value)}`}
+                key={item.id}
+              >
+                {item.label} · {dollars(item.amountCents)}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
+
+      <details className="mt-7 border border-[#343434] bg-[#0d0d0d]">
+        <summary className="cursor-pointer px-5 py-4 font-semibold text-white">
+          Membership pricing, fundraising waiver, and rollout safety
+        </summary>
+        <ActionForm
+          action={saveMembershipSettings}
+          successMessage="Membership settings saved."
+          className="grid gap-4 border-t border-[#333] p-5 sm:grid-cols-2 xl:grid-cols-5"
+        >
+          <label className="field"><span>Membership year</span><input className="input" name="membershipYear" defaultValue={settings.membershipYear} pattern="\d{4}-\d{4}" required /></label>
+          <label className="field"><span>Semester dues</span><input className="input" name="semesterDues" type="number" min="0" step="0.01" defaultValue={settings.semesterDuesCents / 100} required /></label>
+          <label className="field"><span>Annual dues</span><input className="input" name="annualDues" type="number" min="0" step="0.01" defaultValue={settings.annualDuesCents / 100} required /></label>
+          <label className="field"><span>Fundraising waiver</span><input className="input" name="fundraisingWaiverThreshold" type="number" min="0" step="0.01" defaultValue={settings.fundraisingWaiverThresholdCents / 100} required /></label>
+          <label className="field"><span>Grace period (days)</span><input className="input" name="gracePeriodDays" type="number" min="0" max="180" defaultValue={settings.gracePeriodDays} required /></label>
+          <label className="flex gap-3 border border-[#333] p-4 text-sm sm:col-span-2 xl:col-span-4">
+            <input type="checkbox" name="accessEnforcementEnabled" defaultChecked={settings.accessEnforcementEnabled} />
+            <span><strong className="block text-white">Enforce verified membership access</strong><small className="mt-1 block leading-5 text-[#888]">Leave off during migration. When enabled, server authorization and Discord provisioning use the verified profile, dues, waiver, and suspension state.</small></span>
+          </label>
+          <button className="button justify-center xl:self-end">Save membership settings</button>
+        </ActionForm>
+      </details>
 
       {guild && (
         <div className="mt-5 flex flex-col gap-4 border border-[#343434] bg-[#0d0d0d] p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -181,7 +239,7 @@ export async function MembershipDuesPanel({
                 className={`tag w-fit ${
                   dues?.status === "PAID"
                     ? "border-emerald-700 text-emerald-300"
-                    : dues?.status === "WAIVED"
+                    : ["WAIVED", "WAIVED_FUNDRAISING"].includes(dues?.status || "")
                       ? "border-blue-700 text-blue-300"
                       : dues?.status === "PARTIAL"
                         ? "border-amber-700 text-amber-300"
@@ -275,6 +333,23 @@ export async function MembershipDuesPanel({
               <button className="button justify-center lg:col-span-4 lg:w-fit">
                 Save member dues
               </button>
+            </ActionForm>
+            <ActionForm
+              action={addManualMembershipDuesPayment}
+              successMessage="Payment recorded and receipt created."
+              className="grid gap-4 border-t border-[#333] bg-[#0b0b0b] p-4 sm:p-5 lg:grid-cols-4"
+            >
+              <input type="hidden" name="memberId" value={member.id} />
+              <input type="hidden" name="period" value={safePeriod} />
+              <div className="lg:col-span-4"><strong>Record an external payment</strong><p className="mt-1 text-xs text-[#777]">For cash, check, university payments, or another verified method. Stripe payments are recorded automatically by webhook.</p></div>
+              <label className="field"><span>Amount received</span><input className="input" name="amount" type="number" min="0.01" step="0.01" required /></label>
+              <label className="field"><span>Coverage</span><select className="input" name="coverageType" defaultValue="ANNUAL"><option value="ANNUAL">Academic year</option><option value="SEMESTER">Semester</option></select></label>
+              <label className="field"><span>Payment method</span><select className="input" name="paymentMethod" defaultValue="CASH"><option value="CASH">Cash</option><option value="CHECK">Check</option><option value="UNIVERSITY_PAYMENT">University payment</option><option value="OTHER">Other</option></select></label>
+              <label className="field"><span>Payment date</span><input className="input" name="paymentDate" type="date" defaultValue={dateInput(new Date())} required /></label>
+              <label className="field lg:col-span-2"><span>Transaction / reference number</span><input className="input" name="transactionReference" maxLength={180} /></label>
+              <label className="field lg:col-span-2"><span>Private notes</span><input className="input" name="notes" maxLength={2000} /></label>
+              <label className="field lg:col-span-4"><span>Payment proof (private, optional)</span><input className="input file:mr-3 file:border-0 file:bg-[#222] file:px-3 file:py-2 file:text-white" name="proof" type="file" accept="application/pdf,image/jpeg,image/png" /><small className="text-xs text-[#777]">PDF, JPG, or PNG up to 8 MB. Only authorized finance staff can access this evidence.</small></label>
+              <button className="button justify-center lg:col-span-4 lg:w-fit">Record payment and create receipt</button>
             </ActionForm>
           </details>
         ))}

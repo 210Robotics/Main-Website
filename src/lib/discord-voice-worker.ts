@@ -15,6 +15,60 @@ type VoiceSpeechRequest = {
   requestedByMemberId: string;
 };
 
+export type DiscordVoiceSessionDiagnostic = {
+  sessionId: string;
+  state: string;
+  guildId: string;
+  channelId: string;
+  channelName: string;
+  connectedDurationSeconds: number;
+  activeSpeakers: number;
+  queuedSegments: number;
+  pendingSegments: number;
+  lastHeartbeatAt: string;
+  lastAudioOperationAt: string | null;
+  reconnectCount: number;
+  lastError: string | null;
+  lastDisconnectReason: string | null;
+  idleTimeoutMinutes: number;
+};
+
+function workerConfiguration() {
+  const baseUrl = process.env.DISCORD_VOICE_WORKER_URL?.replace(/\/$/, "");
+  const secret = process.env.DISCORD_VOICE_WORKER_SECRET;
+  if (!baseUrl || !secret) {
+    throw new Error("The always-on Discord voice recorder worker is not configured.");
+  }
+  return { baseUrl, secret };
+}
+
+async function workerJson<T>(
+  path: string,
+  init: { method?: "GET" | "POST"; body?: Record<string, unknown>; timeoutMs?: number } = {},
+) {
+  const { baseUrl, secret } = workerConfiguration();
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: init.method || "GET",
+    headers: {
+      authorization: `Bearer ${secret}`,
+      ...(init.body ? { "content-type": "application/json" } : {}),
+    },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+    cache: "no-store",
+    signal: AbortSignal.timeout(init.timeoutMs || 20_000),
+  });
+  const payload = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+    message?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.error || payload.message || `Voice recorder worker returned ${response.status}.`,
+    );
+  }
+  return payload;
+}
+
 export function discordVoiceWorkerConfiguration() {
   return {
     url: Boolean(process.env.DISCORD_VOICE_WORKER_URL),
@@ -102,6 +156,30 @@ export async function stopAllDiscordVoiceRecordings() {
       payload.message ||
       "All active recordings are being finalized and transcribed.",
   };
+}
+
+export async function stopDiscordVoiceRecording(guildId: string) {
+  return workerJson<{ ok: boolean; message: string }>("/recordings/stop", {
+    method: "POST",
+    body: { guildId },
+  });
+}
+
+export async function reconnectDiscordVoiceRecording(guildId: string) {
+  return workerJson<{ ok: boolean; session: DiscordVoiceSessionDiagnostic }>(
+    "/recordings/reconnect",
+    { method: "POST", body: { guildId }, timeoutMs: 180_000 },
+  );
+}
+
+export async function getDiscordVoiceDiagnostics() {
+  return workerJson<{
+    ok: boolean;
+    gatewayStatus: number;
+    processUptimeSeconds: number;
+    memory: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number };
+    sessions: DiscordVoiceSessionDiagnostic[];
+  }>("/diagnostics");
 }
 
 export async function speakDiscordVoiceMessage(input: VoiceSpeechRequest) {

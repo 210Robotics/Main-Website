@@ -38,7 +38,10 @@ import { currentMembershipPeriod } from "@/lib/membership-dues";
 import { generateGeminiText } from "@/lib/team-ai";
 import {
   discordVoiceWorkerConfiguration,
+  getDiscordVoiceDiagnostics,
+  reconnectDiscordVoiceRecording,
   startDiscordVoiceRecording,
+  stopDiscordVoiceRecording,
   stopAllDiscordVoiceRecordings,
 } from "@/lib/discord-voice-worker";
 
@@ -453,6 +456,7 @@ export async function POST(request: Request) {
         "digest",
         "timeout",
         "stopall",
+        "voice",
       ].includes(commandName) &&
       !isAdministrator(interaction.member?.permissions)
     ) {
@@ -690,6 +694,55 @@ export async function POST(request: Request) {
       return deferredInteractionResponse();
     }
 
+    if (commandName === "voice") {
+      if (!discordVoiceWorkerConfiguration().configured) {
+        return interactionResponse(
+          "The Discord voice recorder worker is not configured in production.",
+        );
+      }
+      const subcommand = interaction.data?.options?.[0]?.name || "status";
+      const applicationId =
+        interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+      const interactionToken = interaction.token || "";
+      if (!applicationId || !interactionToken) {
+        return interactionResponse("Discord did not provide enough information for this command.");
+      }
+      after(async () => {
+        try {
+          let content: string;
+          if (subcommand === "stop") {
+            const result = await stopDiscordVoiceRecording(guildId);
+            content = result.message;
+          } else if (subcommand === "reconnect") {
+            const result = await reconnectDiscordVoiceRecording(guildId);
+            content = `Voice session reconnected. State: ${result.session.state}; reconnects: ${result.session.reconnectCount}.`;
+          } else {
+            const diagnostics = await getDiscordVoiceDiagnostics();
+            const session = diagnostics.sessions.find((item) => item.guildId === guildId);
+            if (!session) {
+              content = `Voice worker is online (uptime ${diagnostics.processUptimeSeconds}s). No recording is active in this server.`;
+            } else {
+              content =
+                `Voice state: ${session.state}\nChannel: <#${session.channelId}>\n` +
+                `Connected: ${session.connectedDurationSeconds}s\nReconnects: ${session.reconnectCount}\n` +
+                `Active speakers: ${session.activeSpeakers}\nQueued segments: ${session.queuedSegments}\n` +
+                `Last heartbeat: ${session.lastHeartbeatAt}\n` +
+                `Last disconnect: ${session.lastDisconnectReason || "none"}\n` +
+                `Last error: ${session.lastError || "none"}`;
+            }
+          }
+          await sendInteractionFollowup({ applicationId, token: interactionToken, content });
+        } catch (error) {
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content: error instanceof Error ? error.message : "The voice command failed.",
+          }).catch(() => undefined);
+        }
+      });
+      return deferredInteractionResponse();
+    }
+
     if (commandName === "register") {
       if (guildMember.linkedMemberId) {
         return interactionResponse(
@@ -797,7 +850,7 @@ export async function POST(request: Request) {
       );
     }
     return interactionResponse(
-      "Unknown command. Try /ask, /record, /stopall, /sync, /logs, /calendar, /digest, /timeout, /register, /status, /dues, or /team.",
+      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /logs, /calendar, /digest, /timeout, /register, /status, /dues, or /team.",
     );
   } catch (error) {
     console.error("Discord interaction failed", error);

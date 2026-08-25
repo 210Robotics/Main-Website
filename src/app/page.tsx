@@ -74,7 +74,7 @@ export default async function Home() {
               </Link>
             </div>
           </div>
-          <div className="hero-logo-stage" aria-label="210 Robotics program system">
+          <div className="hero-logo-stage" role="group" aria-label="210 Robotics program system">
             <div className="hero-logo-glow" />
             <div className="hero-logo-orbit" />
             <div className="hero-logo-scan" />

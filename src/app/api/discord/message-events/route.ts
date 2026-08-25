@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import {
   discordChannels,
+  discordEvents,
   discordGuildMembers,
   discordGuilds,
   discordMessages,
@@ -13,6 +14,7 @@ import {
   upsertDiscordGuild,
   upsertDiscordMember,
 } from "@/lib/discord";
+import { hasSensitiveEngineeringAttachment, redactLikelySecrets } from "@/lib/discord-content-protection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,6 +92,29 @@ export async function POST(request: Request) {
     });
     const now = new Date();
     const db = getDb();
+    const [guildSettings] = await db
+      .select({
+        reactionEnabled: discordGuilds.messageReactionEnabled,
+        reactionEmoji: discordGuilds.messageReactionEmoji,
+        duesPublicChannelIds: discordGuilds.duesPublicChannelIds,
+        verificationPublicChannelIds: discordGuilds.verificationPublicChannelIds,
+      })
+      .from(discordGuilds)
+      .where(eq(discordGuilds.id, data.guildId))
+      .limit(1);
+    const protectedContent = redactLikelySecrets(data.content);
+    const publicChannelIds = new Set([
+      ...(guildSettings?.duesPublicChannelIds || []),
+      ...(guildSettings?.verificationPublicChannelIds || []),
+    ]);
+    const sensitivePublicAttachment =
+      publicChannelIds.has(data.channelId) &&
+      hasSensitiveEngineeringAttachment(data.attachments.map((item) => item.filename));
+    const moderationAction = protectedContent.matches
+      ? "REMOVE_SECRET"
+      : sensitivePublicAttachment
+        ? "REMOVE_SENSITIVE_ATTACHMENT"
+        : null;
     await db
       .insert(discordChannels)
       .values({
@@ -107,6 +132,14 @@ export async function POST(request: Request) {
           lastSyncedAt: now,
         },
       });
+    if (moderationAction) {
+      await db.insert(discordEvents).values({
+        guildId: data.guildId,
+        discordUserId: data.author.id,
+        kind: moderationAction,
+        metadata: { channelId: data.channelId, messageId: data.messageId },
+      });
+    }
     const [linked] = await db
       .select({ memberId: discordGuildMembers.linkedMemberId })
       .from(discordGuildMembers)
@@ -129,7 +162,7 @@ export async function POST(request: Request) {
         authorDisplayName: data.author.displayName,
         authorIsBot: false,
         linkedMemberId: linked?.memberId || member.linkedMemberId || null,
-        content: data.content,
+        content: protectedContent.redacted,
         attachments: data.attachments,
         discordCreatedAt: new Date(data.timestamp),
         discordEditedAt: data.editedTimestamp
@@ -152,20 +185,13 @@ export async function POST(request: Request) {
           updatedAt: now,
         },
       });
-    const [reactionSettings] = await db
-      .select({
-        enabled: discordGuilds.messageReactionEnabled,
-        emoji: discordGuilds.messageReactionEmoji,
-      })
-      .from(discordGuilds)
-      .where(eq(discordGuilds.id, data.guildId))
-      .limit(1);
     return NextResponse.json({
       logged: true,
       messageId: data.messageId,
+      moderationAction,
       reaction:
-        reactionSettings?.enabled && reactionSettings.emoji
-          ? reactionSettings.emoji
+        !moderationAction && guildSettings?.reactionEnabled && guildSettings.reactionEmoji
+          ? guildSettings.reactionEmoji
           : null,
     });
   } catch (error) {

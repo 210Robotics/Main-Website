@@ -110,7 +110,49 @@ export const members = pgTable("members", {
   id: uuid("id").defaultRandom().primaryKey(),
   clerkUserId: text("clerk_user_id").notNull().unique(),
   email: text("email").notNull().unique(),
+  normalizedUniversityEmail: text("normalized_university_email"),
+  universityEmailVerifiedAt: timestamp("university_email_verified_at", {
+    withTimezone: true,
+  }),
+  universityEmailOverrideAt: timestamp("university_email_override_at", {
+    withTimezone: true,
+  }),
+  universityEmailOverrideByMemberId: uuid(
+    "university_email_override_by_member_id",
+  ),
+  universityEmailOverrideReason: text("university_email_override_reason"),
+  firstName: text("first_name").notNull().default(""),
+  lastName: text("last_name").notNull().default(""),
   displayName: text("display_name").notNull(),
+  academicLevel: text("academic_level"),
+  major: text("major").notNull().default(""),
+  expectedGraduationYear: integer("expected_graduation_year"),
+  teamInterests: jsonb("team_interests")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  profileCompletedAt: timestamp("profile_completed_at", {
+    withTimezone: true,
+  }),
+  accessState: text("access_state").notNull().default("ACCOUNT_CREATED"),
+  accessStateReason: text("access_state_reason").notNull().default(""),
+  accessStateUpdatedAt: timestamp("access_state_updated_at", {
+    withTimezone: true,
+  })
+    .defaultNow()
+    .notNull(),
+  membershipExpiresAt: timestamp("membership_expires_at", {
+    withTimezone: true,
+  }),
+  gracePeriodEndsAt: timestamp("grace_period_ends_at", {
+    withTimezone: true,
+  }),
+  nicknameSyncEnabled: boolean("nickname_sync_enabled")
+    .notNull()
+    .default(true),
+  discordNicknameSyncedAt: timestamp("discord_nickname_synced_at", {
+    withTimezone: true,
+  }),
   organizationRole: text("organization_role").notNull().default("Member"),
   bio: text("bio").notNull().default(""),
   photoUrl: text("photo_url"),
@@ -128,7 +170,12 @@ export const members = pgTable("members", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => [
+  uniqueIndex("member_verified_university_email_idx")
+    .on(table.normalizedUniversityEmail)
+    .where(sql`${table.normalizedUniversityEmail} is not null`),
+  index("member_access_state_idx").on(table.accessState, table.status),
+]);
 
 export const projects = pgTable("projects", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -1023,6 +1070,34 @@ export const auditEvents = pgTable(
       .notNull(),
   },
   (table) => [index("audit_created_idx").on(table.createdAt)],
+);
+
+export const syncJobRuns = pgTable(
+  "sync_job_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    job: text("job").notNull(),
+    status: text("status").notNull().default("RUNNING"),
+    source: text("source").notNull().default("SCHEDULED"),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    recordsChanged: integer("records_changed").notNull().default(0),
+    error: text("error"),
+    details: jsonb("details")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+  },
+  (table) => [
+    index("sync_job_status_attempt_idx").on(
+      table.job,
+      table.status,
+      table.attemptedAt,
+    ),
+  ],
 );
 
 export const engineeringSeasons = pgTable(
@@ -2037,6 +2112,19 @@ export const discordGuilds = pgTable("discord_guilds", {
     .default(10),
   agreedRoleId: text("agreed_role_id"),
   vexUMemberRoleId: text("vex_u_member_role_id"),
+  unverifiedRoleId: text("unverified_role_id"),
+  utsaVerifiedRoleId: text("utsa_verified_role_id"),
+  verifiedMemberRoleId: text("verified_member_role_id"),
+  suspendedRoleId: text("suspended_role_id"),
+  verificationEnforcementEnabled: boolean(
+    "verification_enforcement_enabled",
+  )
+    .notNull()
+    .default(false),
+  verificationPublicChannelIds: jsonb("verification_public_channel_ids")
+    .$type<string[]>()
+    .notNull()
+    .default([]),
   duesEnforcementEnabled: boolean("dues_enforcement_enabled")
     .notNull()
     .default(false),
@@ -2101,6 +2189,20 @@ export const discordGuildMembers = pgTable(
     linkedMemberId: uuid("linked_member_id").references(() => members.id, {
       onDelete: "set null",
     }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    lastSynchronizedAt: timestamp("last_synchronized_at", {
+      withTimezone: true,
+    }),
+    guildMembershipStatus: text("guild_membership_status")
+      .notNull()
+      .default("ACTIVE"),
+    nicknameSyncStatus: text("nickname_sync_status")
+      .notNull()
+      .default("PENDING"),
+    roleSyncStatus: text("role_sync_status")
+      .notNull()
+      .default("PENDING"),
+    lastSyncError: text("last_sync_error"),
     registrationReminderSentAt: timestamp("registration_reminder_sent_at", {
       withTimezone: true,
     }),
@@ -2137,6 +2239,9 @@ export const discordGuildMembers = pgTable(
       table.guildId,
       table.discordUserId,
     ),
+    uniqueIndex("discord_guild_member_linked_identity_idx")
+      .on(table.guildId, table.linkedMemberId)
+      .where(sql`${table.linkedMemberId} is not null`),
     index("discord_guild_member_linked_idx").on(table.linkedMemberId),
     index("discord_guild_member_active_idx").on(table.guildId, table.leftAt),
   ],
@@ -2318,6 +2423,59 @@ export const discordCalendarReminders = pgTable(
   ],
 );
 
+export const membershipSettings = pgTable("membership_settings", {
+  id: text("id").primaryKey().default("membership"),
+  membershipYear: text("membership_year").notNull().default("2026-2027"),
+  semesterDuesCents: integer("semester_dues_cents").notNull().default(3000),
+  annualDuesCents: integer("annual_dues_cents").notNull().default(5000),
+  fundraisingWaiverThresholdCents: integer(
+    "fundraising_waiver_threshold_cents",
+  )
+    .notNull()
+    .default(10000),
+  gracePeriodDays: integer("grace_period_days").notNull().default(30),
+  accessEnforcementEnabled: boolean("access_enforcement_enabled")
+    .notNull()
+    .default(false),
+  updatedByMemberId: uuid("updated_by_member_id").references(
+    () => members.id,
+    { onDelete: "set null" },
+  ),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const membershipPeriods = pgTable(
+  "membership_periods",
+  {
+    id: text("id").primaryKey(),
+    label: text("label").notNull(),
+    academicYear: text("academic_year").notNull(),
+    coverageType: text("coverage_type").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    graceEndsAt: timestamp("grace_ends_at", { withTimezone: true }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("membership_period_year_active_idx").on(
+      table.academicYear,
+      table.isActive,
+    ),
+  ],
+);
+
 export const membershipDues = pgTable(
   "membership_dues",
   {
@@ -2326,12 +2484,33 @@ export const membershipDues = pgTable(
       .notNull()
       .references(() => members.id, { onDelete: "cascade" }),
     period: text("period").notNull(),
+    membershipPeriodId: text("membership_period_id").references(
+      () => membershipPeriods.id,
+      { onDelete: "set null" },
+    ),
+    coverageType: text("coverage_type").notNull().default("ANNUAL_DUES"),
     amountDueCents: integer("amount_due_cents").notNull().default(0),
     manualAmountPaidCents: integer("manual_amount_paid_cents")
       .notNull()
       .default(0),
     amountPaidCents: integer("amount_paid_cents").notNull().default(0),
     status: text("status").notNull().default("DUE"),
+    fundraisingRaisedCents: integer("fundraising_raised_cents")
+      .notNull()
+      .default(0),
+    fundraisingThresholdCents: integer("fundraising_threshold_cents")
+      .notNull()
+      .default(10000),
+    waiverType: text("waiver_type"),
+    waiverReason: text("waiver_reason"),
+    waivedAt: timestamp("waived_at", { withTimezone: true }),
+    waiverGrantedByMemberId: uuid("waiver_granted_by_member_id").references(
+      () => members.id,
+      { onDelete: "set null" },
+    ),
+    paidBeforeWaiverReview: boolean("paid_before_waiver_review")
+      .notNull()
+      .default(false),
     dueAt: timestamp("due_at", { withTimezone: true }),
     paidAt: timestamp("paid_at", { withTimezone: true }),
     paymentMethod: text("payment_method").notNull().default(""),
@@ -2367,10 +2546,29 @@ export const membershipDuesPayments = pgTable(
     memberId: uuid("member_id")
       .notNull()
       .references(() => members.id, { onDelete: "cascade" }),
-    stripeCheckoutSessionId: text("stripe_checkout_session_id")
-      .notNull()
-      .unique(),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
     stripePaymentIntentId: text("stripe_payment_intent_id"),
+    paymentType: text("payment_type")
+      .notNull()
+      .default("SEMESTER_DUES"),
+    coverageType: text("coverage_type")
+      .notNull()
+      .default("SEMESTER"),
+    coveragePeriod: text("coverage_period").notNull().default(""),
+    paymentMethod: text("payment_method").notNull().default("STRIPE"),
+    paymentDate: timestamp("payment_date", { withTimezone: true }),
+    transactionReference: text("transaction_reference"),
+    receiptNumber: text("receipt_number"),
+    providerReceiptUrl: text("provider_receipt_url"),
+    proofPathname: text("proof_pathname"),
+    proofFilename: text("proof_filename"),
+    proofMimeType: text("proof_mime_type"),
+    proofBytes: integer("proof_bytes"),
+    enteredByMemberId: uuid("entered_by_member_id").references(
+      () => members.id,
+      { onDelete: "set null" },
+    ),
+    notes: text("notes").notNull().default(""),
     amountCents: integer("amount_cents").notNull(),
     refundedCents: integer("refunded_cents").notNull().default(0),
     currency: text("currency").notNull().default("usd"),
@@ -2388,6 +2586,13 @@ export const membershipDuesPayments = pgTable(
     index("membership_dues_payment_member_idx").on(table.memberId),
     index("membership_dues_payment_intent_idx").on(
       table.stripePaymentIntentId,
+    ),
+    uniqueIndex("membership_dues_receipt_number_idx")
+      .on(table.receiptNumber)
+      .where(sql`${table.receiptNumber} is not null`),
+    index("membership_dues_payment_date_idx").on(
+      table.memberId,
+      table.paymentDate,
     ),
   ],
 );

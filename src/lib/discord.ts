@@ -38,6 +38,7 @@ import {
   type DiscordRoleOption,
 } from "@/lib/discord-role-selection";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
+import { reconcileMemberMembership } from "@/lib/membership-access-server";
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -261,6 +262,10 @@ const DISCORD_VIEW_CHANNEL_PERMISSION = "1024";
 const DISCORD_ADMINISTRATOR_PERMISSION = 8;
 const DUES_PAID_ROLE_NAME = "Membership Paid";
 const DUES_UNPAID_ROLE_NAME = "Membership Not Paid";
+const UNVERIFIED_ROLE_NAME = "Unverified";
+const UTSA_VERIFIED_ROLE_NAME = "UTSA Verified";
+const VERIFIED_MEMBER_ROLE_NAME = "Verified Member";
+const SUSPENDED_ROLE_NAME = "Suspended";
 const DUES_CHANNEL_TYPES = new Set([0, 2, 5, 13, 15]);
 
 function normalizedDiscordName(value: string) {
@@ -328,11 +333,35 @@ async function ensureDiscordDuesRoles(guildId: string) {
   let unpaidRole = guild.duesUnpaidRoleId
     ? roleById.get(guild.duesUnpaidRoleId)
     : undefined;
+  let unverifiedRole = guild.unverifiedRoleId
+    ? roleById.get(guild.unverifiedRoleId)
+    : undefined;
+  let utsaVerifiedRole = guild.utsaVerifiedRoleId
+    ? roleById.get(guild.utsaVerifiedRoleId)
+    : undefined;
+  let verifiedMemberRole = guild.verifiedMemberRoleId
+    ? roleById.get(guild.verifiedMemberRoleId)
+    : undefined;
+  let suspendedRole = guild.suspendedRoleId
+    ? roleById.get(guild.suspendedRoleId)
+    : undefined;
   paidRole ??= roles.find(
     (role) => role.name.toLowerCase() === DUES_PAID_ROLE_NAME.toLowerCase(),
   );
   unpaidRole ??= roles.find(
     (role) => role.name.toLowerCase() === DUES_UNPAID_ROLE_NAME.toLowerCase(),
+  );
+  unverifiedRole ??= roles.find(
+    (role) => role.name.toLowerCase() === UNVERIFIED_ROLE_NAME.toLowerCase(),
+  );
+  utsaVerifiedRole ??= roles.find(
+    (role) => role.name.toLowerCase() === UTSA_VERIFIED_ROLE_NAME.toLowerCase(),
+  );
+  verifiedMemberRole ??= roles.find(
+    (role) => role.name.toLowerCase() === VERIFIED_MEMBER_ROLE_NAME.toLowerCase(),
+  );
+  suspendedRole ??= roles.find(
+    (role) => role.name.toLowerCase() === SUSPENDED_ROLE_NAME.toLowerCase(),
   );
   paidRole ??= await createDiscordGuildRole({
     guildId,
@@ -344,15 +373,55 @@ async function ensureDiscordDuesRoles(guildId: string) {
     name: DUES_UNPAID_ROLE_NAME,
     color: 0x6b7280,
   });
+  unverifiedRole ??= await createDiscordGuildRole({
+    guildId,
+    name: UNVERIFIED_ROLE_NAME,
+    color: 0x6b7280,
+  });
+  utsaVerifiedRole ??= await createDiscordGuildRole({
+    guildId,
+    name: UTSA_VERIFIED_ROLE_NAME,
+    color: 0x2563eb,
+  });
+  verifiedMemberRole ??= await createDiscordGuildRole({
+    guildId,
+    name: VERIFIED_MEMBER_ROLE_NAME,
+    color: 0xfd7803,
+  });
+  suspendedRole ??= await createDiscordGuildRole({
+    guildId,
+    name: SUSPENDED_ROLE_NAME,
+    color: 0x991b1b,
+  });
   await getDb()
     .update(discordGuilds)
     .set({
       duesPaidRoleId: paidRole.id,
       duesUnpaidRoleId: unpaidRole.id,
+      unverifiedRoleId: unverifiedRole.id,
+      utsaVerifiedRoleId: utsaVerifiedRole.id,
+      verifiedMemberRoleId: verifiedMemberRole.id,
+      suspendedRoleId: suspendedRole.id,
       updatedAt: new Date(),
     })
     .where(eq(discordGuilds.id, guildId));
-  return { paidRole, unpaidRole, roles: [...roles, paidRole, unpaidRole] };
+  return {
+    paidRole,
+    unpaidRole,
+    unverifiedRole,
+    utsaVerifiedRole,
+    verifiedMemberRole,
+    suspendedRole,
+    roles: [
+      ...roles,
+      paidRole,
+      unpaidRole,
+      unverifiedRole,
+      utsaVerifiedRole,
+      verifiedMemberRole,
+      suspendedRole,
+    ],
+  };
 }
 
 function memberIsDuesExempt({
@@ -457,6 +526,12 @@ export async function syncDiscordDuesAccess({
       accessRole: members.accessRole,
       organizationRole: members.organizationRole,
       memberStatus: members.status,
+      accessState: members.accessState,
+      displayName: members.displayName,
+      nicknameSyncEnabled: members.nicknameSyncEnabled,
+      universityEmailVerifiedAt: members.universityEmailVerifiedAt,
+      universityEmailOverrideAt: members.universityEmailOverrideAt,
+      gracePeriodEndsAt: members.gracePeriodEndsAt,
       duesStatus: membershipDues.status,
       amountDueCents: membershipDues.amountDueCents,
       amountPaidCents: membershipDues.amountPaidCents,
@@ -483,7 +558,8 @@ export async function syncDiscordDuesAccess({
       ),
     );
 
-  const enabled = guild.duesEnforcementEnabled;
+  const enabled =
+    guild.duesEnforcementEnabled || guild.verificationEnforcementEnabled;
   let paid = 0;
   let unpaid = 0;
   let exempt = 0;
@@ -498,39 +574,135 @@ export async function syncDiscordDuesAccess({
     });
     const isPaid =
       row.memberStatus === "ACTIVE" &&
-      (row.duesStatus === "PAID" || row.duesStatus === "WAIVED") &&
+      (row.duesStatus === "PAID" ||
+        row.duesStatus === "WAIVED" ||
+        row.duesStatus === "WAIVED_FUNDRAISING") &&
       (row.duesStatus === "WAIVED" ||
+        row.duesStatus === "WAIVED_FUNDRAISING" ||
         (row.amountDueCents ?? 0) > 0 &&
           (row.amountPaidCents ?? 0) >= (row.amountDueCents ?? 0));
-    const desiredRoleId = !enabled || isExempt
-      ? null
-      : isPaid
-        ? roleState.paidRole.id
-        : roleState.unpaidRole.id;
-    for (const roleId of [roleState.paidRole.id, roleState.unpaidRole.id]) {
-      const shouldHave = desiredRoleId === roleId;
-      if (shouldHave === currentRoles.has(roleId)) continue;
-      await discordFetch(
-        `/guilds/${guildId}/members/${row.discord.discordUserId}/roles/${roleId}`,
-        {
-          method: shouldHave ? "PUT" : "DELETE",
-          headers: {
-            "X-Audit-Log-Reason": encodeURIComponent(
-              "210 Robotics membership dues synchronization",
-            ),
-          },
-        },
-      );
-      changed += 1;
-      if (shouldHave) currentRoles.add(roleId);
-      else currentRoles.delete(roleId);
+    const isEntitled =
+      isExempt ||
+      (row.memberStatus === "ACTIVE" &&
+        (["ACTIVE_MEMBER", "WAIVED_MEMBER", "MENTOR"].includes(
+          row.accessState || "",
+        ) ||
+          Boolean(
+            row.gracePeriodEndsAt && row.gracePeriodEndsAt >= new Date(),
+          )));
+    const desiredRoleId =
+      !enabled || isExempt
+        ? null
+        : !isEntitled
+          ? roleState.unpaidRole.id
+          : isPaid
+            ? roleState.paidRole.id
+            : null;
+    const universityVerified = Boolean(
+      row.universityEmailVerifiedAt || row.universityEmailOverrideAt,
+    );
+    const semanticRoleIds = new Set<string>();
+    if (row.memberStatus === "SUSPENDED") {
+      semanticRoleIds.add(roleState.suspendedRole.id);
+    } else if (!row.discord.linkedMemberId || !universityVerified) {
+      semanticRoleIds.add(roleState.unverifiedRole.id);
+    } else {
+      semanticRoleIds.add(roleState.utsaVerifiedRole.id);
+      if (
+        row.accessState === "ACTIVE_MEMBER" ||
+        row.accessState === "WAIVED_MEMBER" ||
+        isExempt
+      ) {
+        semanticRoleIds.add(roleState.verifiedMemberRole.id);
+      }
     }
+    const managedRoleIds = [
+      roleState.paidRole.id,
+      roleState.unpaidRole.id,
+      roleState.unverifiedRole.id,
+      roleState.utsaVerifiedRole.id,
+      roleState.verifiedMemberRole.id,
+      roleState.suspendedRole.id,
+    ];
+    let syncError: string | null = null;
+    for (const roleId of managedRoleIds) {
+      const shouldHave =
+        roleId === roleState.paidRole.id ||
+        roleId === roleState.unpaidRole.id
+          ? desiredRoleId === roleId
+          : semanticRoleIds.has(roleId);
+      if (shouldHave === currentRoles.has(roleId)) continue;
+      try {
+        await discordFetch(
+          `/guilds/${guildId}/members/${row.discord.discordUserId}/roles/${roleId}`,
+          {
+            method: shouldHave ? "PUT" : "DELETE",
+            headers: {
+              "X-Audit-Log-Reason": encodeURIComponent(
+                "210 Robotics membership entitlement synchronization",
+              ),
+            },
+          },
+        );
+        changed += 1;
+        if (shouldHave) currentRoles.add(roleId);
+        else currentRoles.delete(roleId);
+      } catch (error) {
+        syncError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    let nicknameSynchronized = false;
+    if (
+      row.discord.linkedMemberId &&
+      row.nicknameSyncEnabled &&
+      row.displayName &&
+      row.discord.displayName !== row.displayName
+    ) {
+      try {
+        await discordFetch(
+          `/guilds/${guildId}/members/${row.discord.discordUserId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "X-Audit-Log-Reason": encodeURIComponent(
+                "210 Robotics canonical member name synchronization",
+              ),
+            },
+            body: JSON.stringify({ nick: row.displayName.slice(0, 32) }),
+          },
+        );
+        nicknameSynchronized = true;
+      } catch (error) {
+        syncError ??= error instanceof Error ? error.message : String(error);
+      }
+    }
+    const synchronizedAt = new Date();
     await getDb()
       .update(discordGuildMembers)
-      .set({ roles: [...currentRoles], updatedAt: new Date() })
+      .set({
+        roles: [...currentRoles],
+        displayName: nicknameSynchronized
+          ? row.displayName || row.discord.displayName
+          : row.discord.displayName,
+        lastSynchronizedAt: synchronizedAt,
+        roleSyncStatus: syncError ? "ERROR" : "SYNCED",
+        nicknameSyncStatus: syncError
+          ? "ERROR"
+          : row.nicknameSyncEnabled
+            ? "SYNCED"
+            : "DISABLED",
+        lastSyncError: syncError,
+        updatedAt: synchronizedAt,
+      })
       .where(eq(discordGuildMembers.id, row.discord.id));
+    if (nicknameSynchronized && row.discord.linkedMemberId) {
+      await getDb()
+        .update(members)
+        .set({ discordNicknameSyncedAt: synchronizedAt, updatedAt: synchronizedAt })
+        .where(eq(members.id, row.discord.linkedMemberId));
+    }
     if (!enabled || isExempt) exempt += 1;
-    else if (isPaid) paid += 1;
+    else if (isEntitled) paid += 1;
     else unpaid += 1;
   }
 
@@ -540,7 +712,12 @@ export async function syncDiscordDuesAccess({
       guildId,
       unpaidRoleId: roleState.unpaidRole.id,
       enabled,
-      publicChannelIds: guild.duesPublicChannelIds,
+      publicChannelIds: [
+        ...new Set([
+          ...(guild.duesPublicChannelIds || []),
+          ...(guild.verificationPublicChannelIds || []),
+        ]),
+      ],
     });
   }
   const now = new Date();
@@ -1894,7 +2071,7 @@ export async function handleDiscordMemberJoined({
     .from(discordGuilds)
     .where(eq(discordGuilds.id, guildId))
     .limit(1);
-  if (guild?.duesEnforcementEnabled) {
+  if (guild?.duesEnforcementEnabled || guild?.verificationEnforcementEnabled) {
     try {
       await syncDiscordDuesAccess({
         guildId,
@@ -1944,8 +2121,8 @@ export async function handleDiscordMemberJoined({
     discordUserId: member.discordUserId,
     content:
       `Welcome to 210 Robotics, ${member.displayName}!\n\n` +
-      `Discord's ${delayMinutes}-minute security delay is now running. While you wait, sign in or sign up for the 210 Robotics Portal and link this Discord account:\n${registrationUrl}\n\n` +
-      `After ${delayMinutes} minutes, I will notify you that the delay has passed. Once your account is linked, I will automatically add the Agreed and VEX U Member roles to unlock the server.\n\n` +
+      `Discord's ${delayMinutes}-minute security delay is now running. While you wait, complete the protected member-verification checklist:\n${registrationUrl}\n\n` +
+      `You will verify an @my.utsa.edu address, enter your real team display name and academic year, connect this Discord identity, and confirm dues or a waiver. After ${delayMinutes} minutes, eligible member roles and your team nickname will synchronize automatically.\n\n` +
       `This private link expires in 7 days.`,
     log: {
       username: member.username,
@@ -2013,11 +2190,17 @@ export async function processDiscordOnboarding({
       let roleError = "";
       if (member.linkedMemberId && !member.onboardingRolesAssignedAt) {
         try {
-          roleResult = await assignDiscordOnboardingRoles({
-            guildId: member.guildId,
-            discordUserId: member.discordUserId,
-          });
-          rolesAssigned += 1;
+          const access = await reconcileMemberMembership(member.linkedMemberId);
+          await syncDiscordDuesAccessForMember(member.linkedMemberId);
+          if (access?.entitled) {
+            roleResult = await assignDiscordOnboardingRoles({
+              guildId: member.guildId,
+              discordUserId: member.discordUserId,
+            });
+            rolesAssigned += 1;
+          } else {
+            roleError = access?.reason || "Complete the membership verification checklist in the portal.";
+          }
         } catch (error) {
           roleError =
             error instanceof Error
@@ -2034,9 +2217,9 @@ export async function processDiscordOnboarding({
           });
       const content = member.linkedMemberId
         ? roleError
-          ? `Hi ${member.displayName}! Your security delay has passed and your portal account is linked. Automatic role assignment needs officer review, so an officer can finish unlocking the server from the Discord admin page.`
-          : `Hi ${member.displayName}! Your security delay has passed. Your portal account is linked and the ${roleResult?.roleNames.join(" and ") || "Agreed and VEX U Member"} roles are ready, so the team server should now be unlocked.`
-        : `Hi ${member.displayName}! Your security delay has passed. Link your Discord account to the 210 Robotics Portal and I will automatically add the Agreed and VEX U Member roles to unlock the server:\n${registrationUrl}\n\nThis private link expires in 7 days.`;
+          ? `Hi ${member.displayName}! Your security delay has passed and your portal account is linked, but access is still pending: ${roleError}\n\nFinish the checklist at https://210robotics.com/verify`
+          : `Hi ${member.displayName}! Your security delay has passed. Your verified membership is active and the ${roleResult?.roleNames.join(" and ") || "member"} roles are ready, so the team server should now be unlocked.`
+        : `Hi ${member.displayName}! Your security delay has passed. Verify your UTSA account, complete your profile, connect Discord, and confirm dues or waiver status here:\n${registrationUrl}\n\nThe portal will unlock eligible team channels automatically.`;
       await sendDiscordDirectMessage({
         discordUserId: member.discordUserId,
         content,
@@ -2308,7 +2491,7 @@ export async function sendDiscordRegistrationReminder({
     body: JSON.stringify({
       content:
         `Hi ${member.displayName}! Please link your Discord account and sign in or sign up for the 210 Robotics Portal so team tools can recognize you.\n\n` +
-        `${registrationUrl}\n\nThis private link expires in 7 days.`,
+        `${registrationUrl}\n\nComplete the UTSA email, name/profile, Discord, and dues/waiver checklist. This private link expires in 7 days.`,
       allowed_mentions: { parse: [] },
     }),
   });

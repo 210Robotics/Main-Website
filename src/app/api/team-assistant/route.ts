@@ -8,7 +8,7 @@ import {
   glossaryTerms,
   operationsHubRecords,
 } from "@/db/schema";
-import { requireActiveMember } from "@/lib/auth";
+import { requireMemberEntitlement } from "@/lib/auth";
 import { canAccessAdmin, hasPermission } from "@/lib/permissions";
 import { generateGeminiText } from "@/lib/team-ai";
 
@@ -25,7 +25,7 @@ function plain(value: string) {
 }
 
 export async function POST(request: Request) {
-  const actor = await requireActiveMember();
+  const actor = await requireMemberEntitlement();
   const parsed = z
     .object({ query: z.string().trim().min(2).max(500) })
     .safeParse(await request.json().catch(() => null));

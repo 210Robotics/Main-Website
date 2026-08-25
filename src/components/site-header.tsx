@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, Heart, LogIn, Menu, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { InquiryModal } from "@/components/inquiry-form";
 
@@ -39,6 +39,7 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<"programs" | "explore" | null>(null);
   const [customLinks, setCustomLinks] = useState<NavigationLink[]>([]);
+  const headerRef = useRef<HTMLElement>(null);
   const pathname = usePathname();
   useEffect(() => {
     const controller = new AbortController();
@@ -72,8 +73,22 @@ export function SiteHeader() {
     if (href.startsWith("http")) return false;
     return pathname === href || pathname.startsWith(`${href}/`);
   };
+  useEffect(() => {
+    function closeDropdown(event: PointerEvent) {
+      if (!headerRef.current?.contains(event.target as Node)) setOpenDropdown(null);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenDropdown(null);
+    }
+    document.addEventListener("pointerdown", closeDropdown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeDropdown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
   return (
-    <header className="site-header sticky top-0 z-50 border-b border-[#272727] bg-black/90 backdrop-blur-xl">
+    <header ref={headerRef} className="site-header sticky top-0 z-50 border-b border-[#272727] bg-black/90 backdrop-blur-xl">
       <div className="site-header-inner shell flex h-[74px] items-center gap-3">
         <Link
           href={mainSiteHref("/")}
@@ -132,6 +147,7 @@ export function SiteHeader() {
             <span className="site-donate-label">Donate</span>
           </Link>
           <Link
+            aria-label="Sign in or sign up for the 210 Robotics portal"
             className="button secondary !min-h-10 !px-3"
             href={mainSiteHref("/portal")}
           >
@@ -218,21 +234,43 @@ function NavigationMenu({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const menuId = `site-${label.toLowerCase()}-menu`;
+  function moveFocus(direction: 1 | -1) {
+    const links = [...(detailsRef.current?.querySelectorAll<HTMLAnchorElement>(".site-nav-dropdown a") || [])];
+    if (!links.length) return;
+    const current = links.indexOf(document.activeElement as HTMLAnchorElement);
+    links[(current + direction + links.length) % links.length]?.focus();
+  }
   return (
-    <details className="site-nav-menu" open={open}>
+    <details ref={detailsRef} className="site-nav-menu" open={open}>
       <summary
         className={cn("site-nav-link", active && "is-active")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
         onClick={(event) => {
           event.preventDefault();
           onOpenChange(!open);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            if (!open) onOpenChange(true);
+            requestAnimationFrame(() => moveFocus(1));
+          }
         }}
       >
         {label}
         <ChevronDown aria-hidden="true" className="h-3.5 w-3.5" />
       </summary>
-      <div className="site-nav-dropdown">
+      <div className="site-nav-dropdown" id={menuId} role="menu" aria-label={`${label} pages`}>
         {items.map((item) => (
-          <Link href={mainSiteHref(item.href)} key={item.href} onClick={() => onOpenChange(false)}>
+          <Link href={mainSiteHref(item.href)} key={item.href} role="menuitem" onClick={() => onOpenChange(false)} onKeyDown={(event) => {
+            if (event.key === "ArrowDown") { event.preventDefault(); moveFocus(1); }
+            if (event.key === "ArrowUp") { event.preventDefault(); moveFocus(-1); }
+            if (event.key === "Escape") { event.preventDefault(); onOpenChange(false); detailsRef.current?.querySelector<HTMLElement>("summary")?.focus(); }
+          }}>
             {item.label}
           </Link>
         ))}

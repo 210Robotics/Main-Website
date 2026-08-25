@@ -382,13 +382,16 @@ button {
   min-width: 210px;
   max-width: min(320px, calc(100vw - 2rem));
   transform: translateX(-50%);
-  border: 1px solid #393939;
-  padding: 0.45rem;
-  background: rgba(10, 10, 10, 0.98);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(18px);
+  overflow: hidden;
+  border: 1px solid #474747;
+  border-radius: 0.75rem;
+  padding: 0.55rem;
+  background: #0b0b0b;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(253, 120, 3, 0.05);
 }
 .site-nav-dropdown a {
+  border-radius: 0.45rem;
+  outline: none;
   padding: 0.85rem 0.9rem;
   color: #c9c6c0;
   font-size: 0.78rem;
@@ -399,6 +402,7 @@ button {
 .site-nav-dropdown a:focus-visible {
   background: rgba(253, 120, 3, 0.12);
   color: #fff;
+  box-shadow: inset 3px 0 0 #fd7803;
 }
 .section {
   padding: clamp(4.75rem, 6.5vw, 7.5rem) 0;

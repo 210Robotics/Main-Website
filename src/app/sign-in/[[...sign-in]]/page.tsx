@@ -9,13 +9,13 @@ export const metadata: Metadata = { title: "Sign in" };
 
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ redirect_url?: string }> }) {
   const { redirect_url: requestedRedirect } = await searchParams;
-  const safeRedirect = requestedRedirect?.startsWith("/attendance/check-in/") || requestedRedirect?.startsWith("/docs") || requestedRedirect?.startsWith("/discord/connect")
+  const safeRedirect = requestedRedirect?.startsWith("/attendance/check-in/") || requestedRedirect?.startsWith("/docs") || requestedRedirect?.startsWith("/discord/connect") || requestedRedirect === "/verify"
     ? requestedRedirect
     : "/portal";
   const member = await getCurrentMember();
   if (member?.status === "ACTIVE") redirect(safeRedirect);
   if (member && safeRedirect.startsWith("/discord/connect")) redirect(safeRedirect);
-  if (member) redirect("/pending");
+  if (member) redirect("/verify");
   return (
     <section className="grid-bg min-h-[calc(100dvh-74px)] py-10 sm:py-14 lg:py-20">
       <div className="shell grid items-start gap-6 lg:grid-cols-2 lg:gap-12">
@@ -30,7 +30,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
           </p>
           <p className="mt-4 text-sm leading-6 text-[#999] lg:mt-7 lg:leading-7">
             Continue with Google or use email and password. Every new account
-            still requires manual officer approval before portal access.
+            completes a short verification checklist before private team access.
           </p>
         </div>
         <div className="grid justify-items-center gap-4 lg:justify-items-end">

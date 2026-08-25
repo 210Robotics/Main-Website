@@ -34,7 +34,7 @@ export function DashboardNavigation({
 
   return (
     <div className="my-7">
-      <div className="dashboard-mobile-nav">
+      <div className="dashboard-mobile-nav xl:hidden">
         <label className="dashboard-mobile-picker">
           <span>
             <small>{label}</small>
@@ -54,7 +54,7 @@ export function DashboardNavigation({
         </label>
       </div>
       <nav
-        className="dashboard-desktop-nav mt-3 hidden 2xl:grid"
+        className="dashboard-desktop-nav mt-3 hidden xl:grid"
         aria-label={label}
       >
         {items.map((item) =>

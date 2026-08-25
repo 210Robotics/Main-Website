@@ -1,12 +1,14 @@
 "use client";
 
 import { Check, LoaderCircle, Send, X } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 type Kind = "contact" | "sponsor" | "join";
 
 export function InquiryForm({ kind = "contact", compact = false, onComplete }: { kind?: Kind; compact?: boolean; onComplete?: () => void }) {
+  const formId = useId().replace(/:/g, "");
+  const fieldId = (field: string) => `${kind}-${formId}-${field}`;
   const pathname = usePathname();
   const [state, setState] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
@@ -30,11 +32,11 @@ export function InquiryForm({ kind = "contact", compact = false, onComplete }: {
   }
 
   return <form onSubmit={submit} className={`card grid gap-5 ${compact ? "p-5" : "p-6 md:p-8"}`}>
-    <div className="grid gap-5 sm:grid-cols-2"><div className="field"><label htmlFor={`${kind}-name`}>Name</label><input id={`${kind}-name`} name="name" className="input" minLength={2} maxLength={100} required autoComplete="name"/></div><div className="field"><label htmlFor={`${kind}-email`}>Email</label><input id={`${kind}-email`} name="email" type="email" className="input" required autoComplete="email"/></div></div>
-    {kind === "join" && <div className="field"><label htmlFor={`${kind}-interest`}>Primary interest</label><select id={`${kind}-interest`} name="interest" className="input"><option>Mechanical engineering</option><option>Programming and controls</option><option>Electrical systems</option><option>Business and sponsorship</option><option>Media and outreach</option></select></div>}
-    {kind === "sponsor" && <><div className="field"><label htmlFor={`${kind}-organization`}>Organization</label><input id={`${kind}-organization`} name="organization" className="input" required autoComplete="organization"/></div><div className="field"><label htmlFor={`${kind}-interest`}>How can we help?</label><select id={`${kind}-interest`} name="interest" className="input" required><option value="">Choose a request</option><option>Start a new sponsorship</option><option>Update company or contact information</option><option>Coordinate a sponsor benefit or deliverable</option><option>Plan a renewal</option><option>Request an invoice, receipt, or payment update</option><option>Schedule a team visit or demonstration</option><option>Request an impact update</option><option>Other sponsor support</option></select></div></>}
-    <div className="sr-only" aria-hidden="true"><label htmlFor={`${kind}-website`}>Website</label><input id={`${kind}-website`} name="website" tabIndex={-1} autoComplete="off"/></div>
-    <div className="field"><label htmlFor={`${kind}-message`}>Message</label><textarea id={`${kind}-message`} name="message" className="input min-h-36" minLength={10} maxLength={4000} required/></div>
+    <div className="grid gap-5 sm:grid-cols-2"><div className="field"><label htmlFor={fieldId("name")}>Name</label><input id={fieldId("name")} name="name" className="input" minLength={2} maxLength={100} required autoComplete="name"/></div><div className="field"><label htmlFor={fieldId("email")}>Email</label><input id={fieldId("email")} name="email" type="email" className="input" required autoComplete="email"/></div></div>
+    {kind === "join" && <div className="field"><label htmlFor={fieldId("interest")}>Primary interest</label><select id={fieldId("interest")} name="interest" className="input"><option>Mechanical engineering</option><option>Programming and controls</option><option>Electrical systems</option><option>Business and sponsorship</option><option>Media and outreach</option></select></div>}
+    {kind === "sponsor" && <><div className="field"><label htmlFor={fieldId("organization")}>Organization</label><input id={fieldId("organization")} name="organization" className="input" required autoComplete="organization"/></div><div className="field"><label htmlFor={fieldId("interest")}>How can we help?</label><select id={fieldId("interest")} name="interest" className="input" required><option value="">Choose a request</option><option>Start a new sponsorship</option><option>Update company or contact information</option><option>Coordinate a sponsor benefit or deliverable</option><option>Plan a renewal</option><option>Request an invoice, receipt, or payment update</option><option>Schedule a team visit or demonstration</option><option>Request an impact update</option><option>Other sponsor support</option></select></div></>}
+    <div className="hidden"><label htmlFor={fieldId("website")}>Website</label><input id={fieldId("website")} name="website" tabIndex={-1} autoComplete="off"/></div>
+    <div className="field"><label htmlFor={fieldId("message")}>Message</label><textarea id={fieldId("message")} name="message" className="input min-h-36" minLength={10} maxLength={4000} required/></div>
     <button className="button w-fit" disabled={state === "sending"} type="submit">{state === "sending" ? <LoaderCircle className="animate-spin" size={16}/> : <Send size={16}/>} {state === "sending" ? "Sending" : "Send inquiry"}</button>
     {state !== "idle" && state !== "sending" && <div role="status" className={`flex items-start gap-3 border p-4 text-sm leading-6 ${state === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-red-500/40 bg-red-500/10 text-red-100"}`}>{state === "success" ? <Check className="mt-0.5 shrink-0" size={18}/> : <X className="mt-0.5 shrink-0" size={18}/>}<span>{message}</span></div>}
   </form>;

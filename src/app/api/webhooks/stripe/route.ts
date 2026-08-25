@@ -13,6 +13,7 @@ import {
 } from "@/lib/donations";
 import { getStripe } from "@/lib/stripe";
 import { recalculateMembershipDues } from "@/lib/membership-dues-server";
+import { reconcileMemberMembership } from "@/lib/membership-access-server";
 import { syncDiscordDuesAccessForMember } from "@/lib/discord";
 
 export const runtime = "nodejs";
@@ -75,6 +76,12 @@ async function recordCheckout(session: Stripe.Checkout.Session) {
     })
     .returning();
   if (donation) await syncDonationIncomeEntry(donation);
+  if (donation?.attributedMemberId) {
+    await reconcileMemberMembership(donation.attributedMemberId);
+    await syncDiscordDuesAccessForMember(donation.attributedMemberId).catch(
+      () => undefined,
+    );
+  }
 }
 
 async function refreshMembershipDuesAccess(
@@ -82,6 +89,7 @@ async function refreshMembershipDuesAccess(
   memberId: string,
 ) {
   await recalculateMembershipDues(membershipDuesId);
+  await reconcileMemberMembership(memberId);
   try {
     await syncDiscordDuesAccessForMember(memberId);
   } catch (error) {
@@ -101,6 +109,8 @@ async function recordMembershipDuesCheckout(
     throw new Error("Membership dues checkout metadata is incomplete.");
   }
   const paid = session.payment_status === "paid";
+  const paymentType = session.metadata?.coverageType || "ANNUAL_DUES";
+  const coverageType = paymentType.startsWith("ANNUAL") ? "ANNUAL" : "SEMESTER";
   await getDb()
     .insert(membershipDuesPayments)
     .values({
@@ -112,6 +122,13 @@ async function recordMembershipDuesCheckout(
       currency: session.currency ?? "usd",
       status: paid ? "PAID" : "PROCESSING",
       paidAt: paid ? new Date() : null,
+      paymentDate: paid ? new Date() : null,
+      transactionReference: objectId(session.payment_intent) || session.id,
+      receiptNumber: `210-DUES-${session.id.replace(/^cs_(?:test|live)_/, "").slice(-12).toUpperCase()}`,
+      paymentType,
+      coverageType,
+      coveragePeriod: session.metadata?.coveragePeriod || session.metadata?.period || "",
+      paymentMethod: "STRIPE",
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -122,6 +139,13 @@ async function recordMembershipDuesCheckout(
         currency: session.currency ?? "usd",
         status: paid ? "PAID" : "PROCESSING",
         paidAt: paid ? new Date() : null,
+        paymentDate: paid ? new Date() : null,
+        transactionReference: objectId(session.payment_intent) || session.id,
+        receiptNumber: `210-DUES-${session.id.replace(/^cs_(?:test|live)_/, "").slice(-12).toUpperCase()}`,
+        paymentType,
+        coverageType,
+        coveragePeriod: session.metadata?.coveragePeriod || session.metadata?.period || "",
+        paymentMethod: "STRIPE",
         updatedAt: new Date(),
       },
     });
@@ -176,6 +200,12 @@ async function recordRefund(charge: Stripe.Charge) {
     .where(eq(donations.stripePaymentIntentId, paymentIntentId))
     .returning();
   if (donation) await syncDonationIncomeEntry(donation);
+  if (donation?.attributedMemberId) {
+    await reconcileMemberMembership(donation.attributedMemberId);
+    await syncDiscordDuesAccessForMember(donation.attributedMemberId).catch(
+      () => undefined,
+    );
+  }
   const [duesPayment] = await getDb()
     .update(membershipDuesPayments)
     .set({
@@ -203,6 +233,12 @@ async function recordDispute(dispute: Stripe.Dispute) {
     .where(eq(donations.stripePaymentIntentId, paymentIntentId))
     .returning();
   if (donation) await syncDonationIncomeEntry(donation);
+  if (donation?.attributedMemberId) {
+    await reconcileMemberMembership(donation.attributedMemberId);
+    await syncDiscordDuesAccessForMember(donation.attributedMemberId).catch(
+      () => undefined,
+    );
+  }
   const [duesPayment] = await getDb()
     .update(membershipDuesPayments)
     .set({ status, updatedAt: new Date() })

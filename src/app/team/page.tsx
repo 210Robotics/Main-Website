@@ -12,8 +12,16 @@ export default async function Team() {
     getPublicPortalMembers(),
     getWebsitePageContent("team"),
   ]);
-  const mentors = portalMembers.filter((member) => member.accessRole === "MENTOR");
-  const members = portalMembers.filter((member) => member.accessRole !== "MENTOR");
+  const featuredNames = new Set(
+    [...officers, ...contributors, ...advisors].map((member) =>
+      member.name.trim().toLowerCase().replace(/\s+/g, " "),
+    ),
+  );
+  const directoryOnly = portalMembers.filter(
+    (member) => !featuredNames.has(member.name.trim().toLowerCase().replace(/\s+/g, " ")),
+  );
+  const mentors = directoryOnly.filter((member) => member.accessRole === "MENTOR");
+  const members = directoryOnly.filter((member) => member.accessRole !== "MENTOR");
   return (
     <>
       <PageHero

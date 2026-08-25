@@ -31,9 +31,29 @@ import {
 } from "discord.js";
 import ffmpegPath from "ffmpeg-static";
 import prism from "prism-media";
+import {
+  calculateReconnectDelay,
+  type VoiceSessionState,
+} from "./voice-state.ts";
 
 const PORT = Number(process.env.PORT || 8787);
-const EMPTY_CHANNEL_GRACE_MS = 10_000;
+const VOICE_IDLE_TIMEOUT_MINUTES = Math.max(
+  0,
+  Number(process.env.VOICE_IDLE_TIMEOUT_MINUTES || 10),
+);
+const EMPTY_CHANNEL_GRACE_MS = VOICE_IDLE_TIMEOUT_MINUTES * 60_000;
+const VOICE_MAX_RECONNECT_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.VOICE_MAX_RECONNECT_ATTEMPTS || 8),
+);
+const VOICE_RECONNECT_BASE_DELAY = Math.max(
+  250,
+  Number(process.env.VOICE_RECONNECT_BASE_DELAY || 1_500),
+);
+const VOICE_RECONNECT_MAX_DELAY = Math.max(
+  VOICE_RECONNECT_BASE_DELAY,
+  Number(process.env.VOICE_RECONNECT_MAX_DELAY || 30_000),
+);
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_SPEECH_CHARACTERS = 500;
 const MAX_SPEAKER_TRACK_BYTES = 8 * 1024 * 1024;
@@ -90,6 +110,14 @@ type RecordingSession = StartRequest & {
   hadHumanParticipant: boolean;
   emptyTimer: ReturnType<typeof setTimeout> | null;
   finishing: boolean;
+  state: VoiceSessionState;
+  stateChangedAt: number;
+  lastHeartbeatAt: number;
+  lastAudioOperationAt: number | null;
+  reconnectCount: number;
+  lastError: string | null;
+  lastDisconnectReason: string | null;
+  reconnectPromise: Promise<void> | null;
 };
 
 const client = new Client({
@@ -107,7 +135,44 @@ const sessions = new Map<string, RecordingSession>();
 const speechQueues = new Map<string, Promise<void>>();
 let onboardingTimer: ReturnType<typeof setInterval> | null = null;
 let recordingKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+let voiceHealthTimer: ReturnType<typeof setInterval> | null = null;
 let shutdownPromise: Promise<void> | null = null;
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function transitionSession(
+  session: RecordingSession,
+  state: VoiceSessionState,
+  details: Record<string, unknown> = {},
+) {
+  const previousState = session.state;
+  session.state = state;
+  session.stateChangedAt = Date.now();
+  console.info(
+    JSON.stringify({
+      event: "discord.voice.session_state_changed",
+      sessionId: session.id,
+      guildId: session.guildId,
+      previousState,
+      state,
+      ...details,
+    }),
+  );
+}
+
+function reconnectDelay(attempt: number) {
+  return calculateReconnectDelay({
+    attempt,
+    baseDelayMs: VOICE_RECONNECT_BASE_DELAY,
+    maxDelayMs: VOICE_RECONNECT_MAX_DELAY,
+  });
+}
+
+async function wait(milliseconds: number) {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
 
 function json(
   response: ServerResponse,
@@ -241,6 +306,8 @@ function subscribeToSpeaker(session: RecordingSession, userId: string) {
   const member = session.channel.members.get(userId);
   if (!member || member.user.bot) return;
   session.activeSpeakers.add(userId);
+  session.lastAudioOperationAt = Date.now();
+  if (session.state !== "LISTENING") transitionSession(session, "LISTENING");
   const startMs = Math.max(0, Date.now() - session.startedAt);
   const path = join(
     session.tempDirectory,
@@ -512,6 +579,8 @@ async function uploadCompletedSession(
 async function finishSession(session: RecordingSession, reason: string) {
   if (session.finishing) return;
   session.finishing = true;
+  session.lastDisconnectReason = reason;
+  transitionSession(session, "STOPPING", { reason });
   if (session.emptyTimer) clearTimeout(session.emptyTimer);
   session.connection.destroy();
   for (const stream of session.connection.receiver.subscriptions.values()) {
@@ -519,6 +588,7 @@ async function finishSession(session: RecordingSession, reason: string) {
   }
   await Promise.allSettled([...session.pendingSegments]);
   try {
+    transitionSession(session, "PROCESSING", { reason });
     const audioPath = await renderRecording(session);
     const renderedSpeakerTracks = await renderSpeakerTracks(session);
     const eligibleSpeakerTracks: RenderedSpeakerTrack[] = [];
@@ -576,6 +646,8 @@ async function finishSession(session: RecordingSession, reason: string) {
       }),
     );
   } catch (error) {
+    session.lastError = errorMessage(error);
+    transitionSession(session, "ERROR", { error: session.lastError, reason });
     console.error(
       JSON.stringify({
         event: "discord.voice.session_archive_failed",
@@ -587,6 +659,7 @@ async function finishSession(session: RecordingSession, reason: string) {
       }),
     );
   } finally {
+    transitionSession(session, "DISCONNECTED", { reason });
     sessions.delete(session.guildId);
     synchronizeRecordingKeepalive();
     await rm(session.tempDirectory, { recursive: true, force: true }).catch(
@@ -643,8 +716,74 @@ function synchronizeRecordingKeepalive() {
   }
 }
 
+async function recoverVoiceConnection(session: RecordingSession) {
+  if (session.reconnectPromise || session.finishing) {
+    return session.reconnectPromise;
+  }
+  session.reconnectPromise = (async () => {
+    transitionSession(session, "RECONNECTING");
+    for (
+      let attempt = 1;
+      attempt <= VOICE_MAX_RECONNECT_ATTEMPTS && !session.finishing;
+      attempt += 1
+    ) {
+      session.reconnectCount += 1;
+      const delayMs = reconnectDelay(attempt);
+      console.warn(
+        JSON.stringify({
+          event: "discord.voice.connection_recovery_attempt",
+          sessionId: session.id,
+          attempt,
+          maxAttempts: VOICE_MAX_RECONNECT_ATTEMPTS,
+          delayMs,
+        }),
+      );
+      await wait(delayMs);
+      if (session.finishing) return;
+      try {
+        if (session.connection.state.status === VoiceConnectionStatus.Destroyed) {
+          throw new Error("The Discord voice connection was destroyed.");
+        }
+        session.connection.rejoin({
+          channelId: session.channelId,
+          selfDeaf: false,
+          selfMute: false,
+        });
+        await entersState(
+          session.connection,
+          VoiceConnectionStatus.Ready,
+          20_000,
+        );
+        session.lastHeartbeatAt = Date.now();
+        session.lastDisconnectReason = null;
+        session.lastError = null;
+        transitionSession(session, "LISTENING", { recoveredOnAttempt: attempt });
+        return;
+      } catch (error) {
+        session.lastError = errorMessage(error);
+        console.error(
+          JSON.stringify({
+            event: "discord.voice.connection_recovery_failed",
+            sessionId: session.id,
+            attempt,
+            error: session.lastError,
+          }),
+        );
+      }
+    }
+    if (!session.finishing) {
+      transitionSession(session, "ERROR", { error: session.lastError });
+      await finishSession(session, "voice-connection-retries-exhausted");
+    }
+  })().finally(() => {
+    session.reconnectPromise = null;
+  });
+  return session.reconnectPromise;
+}
+
 function monitorVoiceConnection(session: RecordingSession) {
   session.connection.on("stateChange", (previous, next) => {
+    session.lastHeartbeatAt = Date.now();
     console.info(
       JSON.stringify({
         event: "discord.voice.connection_state_changed",
@@ -655,6 +794,7 @@ function monitorVoiceConnection(session: RecordingSession) {
     );
   });
   session.connection.on("error", (error) => {
+    session.lastError = error.message;
     console.error(
       JSON.stringify({
         event: "discord.voice.connection_error",
@@ -664,39 +804,14 @@ function monitorVoiceConnection(session: RecordingSession) {
     );
   });
   session.connection.on(VoiceConnectionStatus.Disconnected, () => {
-    void (async () => {
-      try {
-        await Promise.race([
-          entersState(
-            session.connection,
-            VoiceConnectionStatus.Signalling,
-            5_000,
-          ),
-          entersState(
-            session.connection,
-            VoiceConnectionStatus.Connecting,
-            5_000,
-          ),
-        ]);
-      } catch {
-        try {
-          await entersState(
-            session.connection,
-            VoiceConnectionStatus.Ready,
-            20_000,
-          );
-        } catch (error) {
-          console.error(
-            JSON.stringify({
-              event: "discord.voice.connection_recovery_failed",
-              sessionId: session.id,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-          await finishSession(session, "voice-connection-lost");
-        }
-      }
-    })();
+    session.lastDisconnectReason = "discord-voice-disconnected";
+    void recoverVoiceConnection(session);
+  });
+  session.connection.on(VoiceConnectionStatus.Ready, () => {
+    session.lastHeartbeatAt = Date.now();
+    if (!session.finishing && session.state !== "SPEAKING") {
+      transitionSession(session, "LISTENING");
+    }
   });
 }
 
@@ -709,6 +824,7 @@ function updateEmptyChannelTimer(session: RecordingSession) {
     return;
   }
   if (
+    EMPTY_CHANNEL_GRACE_MS > 0 &&
     session.hadHumanParticipant &&
     !session.emptyTimer &&
     !session.finishing
@@ -768,11 +884,16 @@ async function speakInChannel(input: SpeechRequest) {
       if (ownsConnection) {
         await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
       }
+      if (activeSession) transitionSession(activeSession, "SPEAKING");
       await playSpeech({
         connection,
         text: input.text,
         directory,
       });
+      if (activeSession && !activeSession.finishing) {
+        activeSession.lastAudioOperationAt = Date.now();
+        transitionSession(activeSession, "LISTENING");
+      }
     } finally {
       if (ownsConnection) connection.destroy();
       await rm(directory, { recursive: true, force: true }).catch(
@@ -838,12 +959,21 @@ async function startSession(input: StartRequest) {
     hadHumanParticipant: humanCount(channel) > 0,
     emptyTimer: null,
     finishing: false,
+    state: "READY",
+    stateChangedAt: Date.now(),
+    lastHeartbeatAt: Date.now(),
+    lastAudioOperationAt: Date.now(),
+    reconnectCount: 0,
+    lastError: null,
+    lastDisconnectReason: null,
+    reconnectPromise: null,
   };
   connection.receiver.speaking.on("start", (userId) =>
     subscribeToSpeaker(session, userId),
   );
   sessions.set(input.guildId, session);
   monitorVoiceConnection(session);
+  transitionSession(session, "LISTENING");
   synchronizeRecordingKeepalive();
   updateEmptyChannelTimer(session);
   console.info(
@@ -936,6 +1066,39 @@ client.on("guildMemberAdd", (member) => {
       }),
     );
   });
+});
+
+client.on("ready", () => {
+  console.info(
+    JSON.stringify({
+      event: "discord.gateway.ready",
+      botUserId: client.user?.id || null,
+      guilds: client.guilds.cache.size,
+    }),
+  );
+});
+
+client.on("shardDisconnect", (event, shardId) => {
+  console.warn(
+    JSON.stringify({
+      event: "discord.gateway.shard_disconnected",
+      shardId,
+      code: event.code,
+      reason: event.reason || null,
+    }),
+  );
+});
+
+client.on("shardReconnecting", (shardId) => {
+  console.warn(
+    JSON.stringify({ event: "discord.gateway.shard_reconnecting", shardId }),
+  );
+});
+
+client.on("error", (error) => {
+  console.error(
+    JSON.stringify({ event: "discord.gateway.error", error: error.message }),
+  );
 });
 
 client.on("voiceStateUpdate", (oldState, newState) => {
@@ -1050,7 +1213,16 @@ client.on("messageCreate", (message) => {
     }
     const result = (await response.json()) as {
       reaction?: string | null;
+      moderationAction?: "REMOVE_SECRET" | "REMOVE_SENSITIVE_ATTACHMENT" | null;
     };
+    if (result.moderationAction) {
+      await message.delete();
+      const warning = result.moderationAction === "REMOVE_SECRET"
+        ? "Your message was removed because it appeared to contain a credential or secret. Rotate that credential immediately and contact an officer if you need help. The detected value was redacted from the portal log."
+        : "Your message was removed because an internal engineering file was posted in a public/guest channel. Please use an authorized internal engineering channel.";
+      await message.author.send(warning).catch(() => undefined);
+      return;
+    }
     if (result.reaction) {
       await message.react(result.reaction);
     }
@@ -1067,8 +1239,34 @@ client.on("messageCreate", (message) => {
   });
 });
 
+function sessionDiagnostics(session: RecordingSession) {
+  return {
+    sessionId: session.id,
+    state: session.state,
+    guildId: session.guildId,
+    channelId: session.channelId,
+    channelName: session.channel.name,
+    connectedDurationSeconds: Math.max(
+      0,
+      Math.round((Date.now() - session.startedAt) / 1_000),
+    ),
+    activeSpeakers: session.activeSpeakers.size,
+    queuedSegments: session.segments.length,
+    pendingSegments: session.pendingSegments.size,
+    lastHeartbeatAt: new Date(session.lastHeartbeatAt).toISOString(),
+    lastAudioOperationAt: session.lastAudioOperationAt
+      ? new Date(session.lastAudioOperationAt).toISOString()
+      : null,
+    reconnectCount: session.reconnectCount,
+    lastError: session.lastError,
+    lastDisconnectReason: session.lastDisconnectReason,
+    idleTimeoutMinutes: VOICE_IDLE_TIMEOUT_MINUTES,
+  };
+}
+
 const server = createServer(async (request, response) => {
-  if (request.method === "GET" && request.url === "/health") {
+  const pathname = new URL(request.url || "/", "http://voice-worker.local").pathname;
+  if (request.method === "GET" && pathname === "/health") {
     return json(response, 200, {
       ok: client.isReady(),
       activeRecordings: sessions.size,
@@ -1080,13 +1278,33 @@ const server = createServer(async (request, response) => {
       recordingKeepaliveActive: Boolean(recordingKeepaliveTimer),
       renderExternalUrlConfigured: Boolean(process.env.RENDER_EXTERNAL_URL),
       uptimeSeconds: Math.round(process.uptime()),
+      gatewayStatus: client.ws.status,
       commit: process.env.RENDER_GIT_COMMIT?.slice(0, 12) || null,
     });
   }
   if (!authorized(request)) {
     return json(response, 401, { error: "Unauthorized" });
   }
-  if (request.method === "POST" && request.url === "/recordings/start") {
+  if (request.method === "GET" && pathname === "/diagnostics") {
+    const memory = process.memoryUsage();
+    return json(response, 200, {
+      ok: client.isReady(),
+      gatewayStatus: client.ws.status,
+      processUptimeSeconds: Math.round(process.uptime()),
+      memory: {
+        rssBytes: memory.rss,
+        heapUsedBytes: memory.heapUsed,
+        heapTotalBytes: memory.heapTotal,
+      },
+      reconnectPolicy: {
+        maxAttempts: VOICE_MAX_RECONNECT_ATTEMPTS,
+        baseDelayMs: VOICE_RECONNECT_BASE_DELAY,
+        maxDelayMs: VOICE_RECONNECT_MAX_DELAY,
+      },
+      sessions: [...sessions.values()].map(sessionDiagnostics),
+    });
+  }
+  if (request.method === "POST" && pathname === "/recordings/start") {
     try {
       const input = await requestJson(request);
       if (!validStartRequest(input)) {
@@ -1108,7 +1326,7 @@ const server = createServer(async (request, response) => {
       });
     }
   }
-  if (request.method === "POST" && request.url === "/recordings/stop") {
+  if (request.method === "POST" && pathname === "/recordings/stop") {
     try {
       const input = (await requestJson(request)) as { guildId?: string };
       const session = input.guildId ? sessions.get(input.guildId) : null;
@@ -1128,7 +1346,7 @@ const server = createServer(async (request, response) => {
   }
   if (
     request.method === "POST" &&
-    request.url === "/recordings/stop-all"
+    pathname === "/recordings/stop-all"
   ) {
     const activeSessions = [...sessions.values()].filter(
       (session) => !session.finishing,
@@ -1144,7 +1362,23 @@ const server = createServer(async (request, response) => {
         : "There were no active recordings to stop.",
     });
   }
-  if (request.method === "POST" && request.url === "/speech") {
+  if (request.method === "POST" && pathname === "/recordings/reconnect") {
+    try {
+      const input = (await requestJson(request)) as { guildId?: string };
+      const session = input.guildId ? sessions.get(input.guildId) : null;
+      if (!session) {
+        return json(response, 404, { error: "No active recording was found." });
+      }
+      await recoverVoiceConnection(session);
+      return json(response, 200, {
+        ok: true,
+        session: sessionDiagnostics(session),
+      });
+    } catch (error) {
+      return json(response, 409, { error: errorMessage(error) });
+    }
+  }
+  if (request.method === "POST" && pathname === "/speech") {
     try {
       const input = await requestJson(request);
       if (!validSpeechRequest(input)) {
@@ -1181,6 +1415,17 @@ async function main() {
   onboardingTimer = setInterval(() => {
     void processDueOnboarding();
   }, 60_000);
+  voiceHealthTimer = setInterval(() => {
+    const now = Date.now();
+    for (const session of sessions.values()) {
+      if (
+        client.isReady() &&
+        session.connection.state.status === VoiceConnectionStatus.Ready
+      ) {
+        session.lastHeartbeatAt = now;
+      }
+    }
+  }, 30_000);
   server.listen(PORT, () => {
     console.info(
       JSON.stringify({
@@ -1212,6 +1457,8 @@ async function gracefulShutdown(signal: string) {
     onboardingTimer = null;
     if (recordingKeepaliveTimer) clearInterval(recordingKeepaliveTimer);
     recordingKeepaliveTimer = null;
+    if (voiceHealthTimer) clearInterval(voiceHealthTimer);
+    voiceHealthTimer = null;
     await Promise.allSettled(
       [...sessions.values()].map((session) =>
         finishSession(session, "worker-shutdown"),
@@ -1262,6 +1509,19 @@ process.once("SIGINT", () => {
 process.on("beforeExit", () => {
   if (onboardingTimer) clearInterval(onboardingTimer);
   if (recordingKeepaliveTimer) clearInterval(recordingKeepaliveTimer);
+  if (voiceHealthTimer) clearInterval(voiceHealthTimer);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error(
+    JSON.stringify({ event: "process.unhandled_rejection", error: errorMessage(error) }),
+  );
+});
+
+process.on("uncaughtException", (error) => {
+  console.error(
+    JSON.stringify({ event: "process.uncaught_exception", error: errorMessage(error) }),
+  );
 });
 
 void main().catch((error) => {

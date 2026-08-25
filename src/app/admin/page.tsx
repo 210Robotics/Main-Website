@@ -76,6 +76,8 @@ import { ConstitutionManager } from "@/components/constitution-manager";
 import { AssistantWorkspace } from "@/components/team-os-workspace";
 import { DiscordAdminPanel } from "@/components/discord-admin-panel";
 import { MembershipDuesPanel } from "@/components/membership-dues-panel";
+import { SystemHealthPanel } from "@/components/system-health-panel";
+import { MembershipMigrationPanel } from "@/components/membership-migration-panel";
 import { adminLoadPlan, normalizeAdminTab } from "@/lib/workspace-loading";
 
 export const metadata: Metadata = {
@@ -867,6 +869,7 @@ export default async function AdminPage({
                 </Link>
               </div>
             </div>
+            {canDiscord && <SystemHealthPanel />}
           </Panel>
         )}
         {canOperations && tab === "assistant" && <AssistantWorkspace uploaderId={actor.id} />}
@@ -1110,6 +1113,9 @@ export default async function AdminPage({
               <button className="button">Save homepage count</button>
             </form>
           </Panel>
+        )}
+        {canMembers && tab === "members" && (
+          <MembershipMigrationPanel />
         )}
         {canMembers && tab === "members" && (
           <Panel title="Pending accounts" eyebrow="Members">

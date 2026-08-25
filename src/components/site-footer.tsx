@@ -88,7 +88,7 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-[#242424]">
-        <div className="shell flex flex-wrap justify-between gap-3 py-5 font-mono text-[.65rem] uppercase tracking-wider text-[#777]">
+        <div className="shell flex flex-wrap justify-between gap-3 py-5 font-mono text-[.65rem] uppercase tracking-wider text-[#aaa]">
           <span>© 2026 210 Robotics</span>
           <span className="flex flex-wrap gap-x-4 gap-y-2">
             <Link className="transition hover:text-white" href="/privacy">

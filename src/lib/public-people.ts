@@ -90,17 +90,32 @@ export async function getPublicPortalMembers(): Promise<Member[]> {
       and(eq(memberTable.status, "ACTIVE"), eq(memberTable.isPublic, true)),
     )
     .orderBy(asc(memberTable.displayName));
-  const grouped = new Map<string, Member>();
+  const grouped = new Map<string, Member & { identityKey: string; quality: number }>();
   for (const row of rows) {
+    const localEmail = row.member.email.split("@", 1)[0]?.toLowerCase() || "";
+    const isSystemProfile =
+      row.member.accessRole === "SUPER_ADMIN" &&
+      ["admin", "administrator", "system", "test"].includes(localEmail);
+    if (isSystemProfile || ["SUSPENDED", "EXPIRED"].includes(row.member.accessState)) continue;
+    const identityKey =
+      row.member.normalizedUniversityEmail ||
+      row.member.clerkUserId ||
+      row.member.displayName.trim().toLowerCase().replace(/\s+/g, " ");
+    const quality =
+      Number(Boolean(row.member.profileCompletedAt)) * 4 +
+      Number(Boolean(row.blobUrl || row.member.photoUrl)) * 2 +
+      Number(Boolean(row.member.bio));
     if (!grouped.has(row.member.id)) {
       grouped.set(row.member.id, {
         id: row.member.id,
         name: row.member.displayName,
-        role: row.member.organizationRole || "Member",
+        role: titleCase(row.member.organizationRole || "Member"),
         projects: [],
         image: row.blobUrl ?? row.member.photoUrl ?? undefined,
         bio: row.member.bio,
         accessRole: row.member.accessRole,
+        identityKey,
+        quality,
       });
     }
     if (
@@ -112,5 +127,28 @@ export async function getPublicPortalMembers(): Promise<Member[]> {
       if (!member.projects.includes(project)) member.projects.push(project);
     }
   }
-  return [...grouped.values()];
+  const canonical = new Map<string, Member & { identityKey: string; quality: number }>();
+  for (const candidate of grouped.values()) {
+    const existing = canonical.get(candidate.identityKey);
+    if (!existing || candidate.quality > existing.quality) {
+      canonical.set(candidate.identityKey, candidate);
+    }
+  }
+  return [...canonical.values()].map((candidate) => ({
+    id: candidate.id,
+    name: candidate.name,
+    role: candidate.role,
+    projects: candidate.projects,
+    image: candidate.image,
+    bio: candidate.bio,
+    accessRole: candidate.accessRole,
+  }));
+}
+
+function titleCase(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (letter) => letter.toUpperCase())
+    .replace(/\b(Cad|Cam|Cae|Vex|Utsa)\b/g, (word) => word.toUpperCase());
 }

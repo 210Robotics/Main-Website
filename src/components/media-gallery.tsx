@@ -50,7 +50,7 @@ export function MediaGallery({
     : groups[0]?.[0] ?? null;
   const selectedEvent = groups.find(([key]) => key === selectedEventKey);
   const sharedFolderLink = showSharedFolderLink ? (
-    <p className="mt-4 text-right text-[.68rem] text-[#666]">
+    <p className="mt-4 text-right text-[.68rem] text-[#aaa]">
       <a
         className="transition hover:text-[#fd7803]"
         href="https://drive.google.com/drive/folders/1IHg3ihyrWAotDgLh1_krBtgnKM5L6wXD"

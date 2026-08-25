@@ -13,7 +13,7 @@ export default async function RegisterPage({
   const { redirect_url: requestedRedirect } = await searchParams;
   const safeRedirect = requestedRedirect?.startsWith("/discord/connect")
     ? requestedRedirect
-    : "/pending";
+    : "/verify";
   return (
     <section className="grid-bg min-h-[760px] py-20">
       <div className="shell grid items-start gap-12 lg:grid-cols-2">
@@ -21,9 +21,9 @@ export default async function RegisterPage({
           <p className="eyebrow">Create an account</p>
           <h1 className="display">Join the portal.</h1>
           <p className="lede mt-7">
-            Continue with Google or register with email and password. Your
-            account remains pending until an admin verifies your membership and
-            assigns access.
+            Continue with Google or register with email and password. You will
+            complete a short member profile, verify your UTSA email,
+            connect Discord, and review your membership status.
           </p>
           <p className="mt-7 text-sm leading-7 text-[#999]">
             Approved active member names and organization titles appear in the

@@ -39,6 +39,17 @@ export const discordApplicationCommands = [
     default_member_permissions: "8",
   },
   {
+    name: "voice",
+    description: "Inspect or control the Discord voice recorder",
+    default_member_permissions: "8",
+    options: [
+      { type: 1, name: "status", description: "Show the current voice recording state" },
+      { type: 1, name: "diagnostics", description: "Show voice health and reconnect details" },
+      { type: 1, name: "reconnect", description: "Reconnect the active recording safely" },
+      { type: 1, name: "stop", description: "Stop and archive this server's recording" },
+    ],
+  },
+  {
     name: "sync",
     description: "Synchronize Discord members and messages with the portal",
     default_member_permissions: "8",

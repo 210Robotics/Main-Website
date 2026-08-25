@@ -14,3 +14,9 @@ services:
         sync: false
       - key: SITE_URL
         value: https://210robotics.com
+      - key: VOICE_IDLE_TIMEOUT_MINUTES
+        value: "10"
+      - key: VOICE_MAX_RECONNECT_ATTEMPTS
+        value: "8"
+      - key: VOICE_RECONNECT_BASE_DELAY
+        value: "1500"

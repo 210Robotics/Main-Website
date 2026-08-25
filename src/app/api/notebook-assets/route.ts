@@ -1,5 +1,5 @@
 import { get } from "@vercel/blob";
-import { requireActiveMember } from "@/lib/auth";
+import { requireMemberEntitlement } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { privateBlobToken } from "@/lib/private-blob";
 
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const actor = await requireActiveMember();
+  const actor = await requireMemberEntitlement();
   if (
     !hasPermission(
       actor.accessRole,

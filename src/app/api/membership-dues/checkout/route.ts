@@ -42,7 +42,11 @@ export async function POST(request: Request) {
       { status: 404 },
     );
   }
-  if (dues.status === "WAIVED" || dues.status === "PAID") {
+  if (
+    dues.status === "WAIVED" ||
+    dues.status === "WAIVED_FUNDRAISING" ||
+    dues.status === "PAID"
+  ) {
     return Response.json(
       { message: "These membership dues are already settled." },
       { status: 409 },
@@ -66,7 +70,6 @@ export async function POST(request: Request) {
       redirect_on_completion: "never",
       customer_email: member.email,
       client_reference_id: member.id,
-      payment_method_types: ["card"],
       line_items: [
         {
           quantity: 1,
@@ -91,6 +94,7 @@ export async function POST(request: Request) {
         membershipDuesId: dues.id,
         memberId: member.id,
         period: dues.period,
+        coverageType: dues.coverageType,
       },
       payment_intent_data: {
         metadata: {
@@ -98,6 +102,7 @@ export async function POST(request: Request) {
           membershipDuesId: dues.id,
           memberId: member.id,
           period: dues.period,
+          coverageType: dues.coverageType,
         },
       },
     });
@@ -113,6 +118,14 @@ export async function POST(request: Request) {
         membershipDuesId: dues.id,
         memberId: member.id,
         stripeCheckoutSessionId: session.id,
+        paymentType: dues.coverageType,
+        coverageType: dues.coverageType.startsWith("ANNUAL")
+          ? "ANNUAL"
+          : "SEMESTER",
+        coveragePeriod: dues.period,
+        paymentMethod: "STRIPE",
+        transactionReference: session.id,
+        receiptNumber: `210-DUES-${session.id.slice(-12).toUpperCase()}`,
         amountCents: outstandingCents,
         currency: session.currency ?? "usd",
         status: "PENDING",
@@ -133,4 +146,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

@@ -10,6 +10,7 @@ COPY package.json ./
 RUN npm install --omit=dev
 
 COPY index.ts ./
+COPY voice-state.ts ./
 
 ENV NODE_ENV=production
 EXPOSE 8787

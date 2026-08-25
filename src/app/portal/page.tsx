@@ -24,6 +24,7 @@ import {
   engineeringParts,
   manufacturingSteps,
   membershipDues,
+  membershipDuesPayments,
   designChanges,
   operationsHubRecords,
   scoutingMatches,
@@ -34,7 +35,7 @@ import {
   deleteContribution,
   deleteHour,
 } from "@/app/portal/actions";
-import { hasClerk, requireActiveMember } from "@/lib/auth";
+import { hasClerk, requireMemberEntitlement } from "@/lib/auth";
 import { formatHours } from "@/lib/utils";
 import { teamAiIsConfigured } from "@/lib/team-ai";
 import { TimeClock } from "@/components/time-clock";
@@ -73,7 +74,7 @@ export default async function PortalPage({
   const tab = normalizePortalTab(requestedTab);
   const load = portalLoadPlan(tab);
   if (!hasClerk() || !hasDatabase()) return <SetupNotice />;
-  const member = await requireActiveMember();
+  const member = await requireMemberEntitlement();
   const canNotebookView = hasPermission(
     member.accessRole,
     "notebook.view",
@@ -386,6 +387,14 @@ export default async function PortalPage({
         )
         .limit(1)
     : [];
+  const duesPayments = load.dues
+    ? await getDb()
+        .select()
+        .from(membershipDuesPayments)
+        .where(eq(membershipDuesPayments.memberId, member.id))
+        .orderBy(desc(membershipDuesPayments.paymentDate), desc(membershipDuesPayments.createdAt))
+        .limit(50)
+    : [];
   const completedPolls = completedPollRows.filter(
     ({ poll }, index, rows) =>
       rows.findIndex((candidate) => candidate.poll.id === poll.id) === index,
@@ -559,6 +568,17 @@ export default async function PortalPage({
               amountPaidCents={currentDues.amountPaidCents}
               status={currentDues.status}
               dueAt={currentDues.dueAt?.toISOString() ?? null}
+              fundraisingRaisedCents={currentDues.fundraisingRaisedCents}
+              fundraisingThresholdCents={currentDues.fundraisingThresholdCents}
+              payments={duesPayments.map((payment) => ({
+                id: payment.id,
+                amountCents: payment.amountCents - payment.refundedCents,
+                paymentDate: (payment.paymentDate || payment.paidAt || payment.createdAt).toISOString(),
+                paymentMethod: payment.paymentMethod,
+                coveragePeriod: payment.coveragePeriod,
+                status: payment.status,
+                receiptNumber: payment.receiptNumber,
+              }))}
               publishableKey={process.env.STRIPE_PUBLISHABLE_KEY ?? ""}
             />
           ) : (

@@ -30,18 +30,22 @@ export async function recalculateMembershipDues(membershipDuesId: string) {
     0,
     dues.manualAmountPaidCents + stripePaidCents,
   );
-  const status = membershipDuesStatus({
+  const calculatedStatus = membershipDuesStatus({
     amountDueCents: dues.amountDueCents,
     amountPaidCents,
-    waived: dues.status === "WAIVED",
+    waived: dues.status === "WAIVED" || dues.waiverType === "ADMIN",
   });
+  const status =
+    dues.status === "WAIVED_FUNDRAISING" || dues.waiverType === "FUNDRAISING"
+      ? "WAIVED_FUNDRAISING"
+      : calculatedStatus;
   const now = new Date();
   const [updated] = await getDb()
     .update(membershipDues)
     .set({
       amountPaidCents,
       status,
-      paidAt: status === "PAID" ? dues.paidAt ?? now : null,
+      paidAt: amountPaidCents >= dues.amountDueCents ? dues.paidAt ?? now : null,
       paymentMethod:
         stripePaidCents > 0
           ? dues.manualAmountPaidCents > 0
@@ -54,4 +58,3 @@ export async function recalculateMembershipDues(membershipDuesId: string) {
     .returning();
   return updated ?? null;
 }
-

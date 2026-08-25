@@ -10,6 +10,7 @@ import {
   syncDiscordGuild,
   syncDiscordMessages,
 } from "@/lib/discord";
+import { reconcileAllMembershipAccess } from "@/lib/membership-access-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -26,43 +27,34 @@ export async function GET(request: NextRequest) {
     });
   }
   try {
+    const membership = await reconcileAllMembershipAccess();
     const result = await syncDiscordGuild();
-    const [
-      commands,
-      messages,
-      reminders,
-      monthlyDigest,
-      registrationDms,
-      onboarding,
-    ] =
-      await Promise.all([
-        registerDiscordCommands(result.guildId),
-        syncDiscordMessages(result.guildId),
-        sendDiscordCalendarReminders(result.guildId),
-        sendDiscordMonthlyCalendarDigest(result.guildId),
-        sendDiscordRegistrationReminders({
-          guildId: result.guildId,
-          limit: 25,
+    const jobs = {
+      commands: () => registerDiscordCommands(result.guildId),
+      messages: () => syncDiscordMessages(result.guildId),
+      reminders: () => sendDiscordCalendarReminders(result.guildId),
+      monthlyDigest: () => sendDiscordMonthlyCalendarDigest(result.guildId),
+      registrationDms: () => sendDiscordRegistrationReminders({ guildId: result.guildId, limit: 25 }),
+      onboarding: () => processDiscordOnboarding({ guildId: result.guildId, limit: 100 }),
+      access: () => syncDiscordDuesAccess({ guildId: result.guildId, configureChannels: false }),
+    };
+    const operations = Object.fromEntries(
+      await Promise.all(
+        Object.entries(jobs).map(async ([name, run]) => {
+          try {
+            return [name, { status: "SUCCESS", result: await run() }] as const;
+          } catch (error) {
+            console.error(`Scheduled Discord ${name} job failed`, error);
+            return [name, { status: "ERROR", error: error instanceof Error ? error.message : String(error) }] as const;
+          }
         }),
-        processDiscordOnboarding({
-          guildId: result.guildId,
-          limit: 100,
-        }),
-      ]);
-    const duesAccess = await syncDiscordDuesAccess({
-      guildId: result.guildId,
-      configureChannels: false,
-    });
+      ),
+    );
     return NextResponse.json({
       skipped: false,
+      membershipReconciled: membership.length,
       ...result,
-      commands: commands.map((command) => command.name),
-      messages,
-      reminders,
-      monthlyDigest,
-      registrationDms,
-      onboarding,
-      duesAccess,
+      operations,
     });
   } catch (error) {
     console.error("Scheduled Discord synchronization failed", error);

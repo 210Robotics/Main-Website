@@ -79,7 +79,7 @@ export default async function DonatePage({
           </div>
           <div className="flex flex-col items-start gap-3 border-l-2 border-[#fd7803] pl-5 lg:items-end lg:border-l-0 lg:pl-0">
             <p className="font-mono text-[.62rem] font-bold uppercase tracking-[.18em] text-[#888]">
-              Membership starts at <strong className="text-[#fd7803]">$210</strong>
+              Supporter recognition starts at <strong className="text-[#fd7803]">$210</strong>
             </p>
             <Link
               className="button !min-h-12 !px-7 !text-sm"
@@ -389,7 +389,7 @@ function LeaderboardRows({
 }) {
   if (!rows.length) return <p className="mt-8 text-sm text-[#777]">{empty}</p>;
   return (
-    <ol className="mt-7">
+    <ol className="mt-7 list-none" aria-label="Ranked supporters">
       {rows.map((row, index) => (
         <li
           className="flex items-center gap-4 border-t border-[#333] py-4 first:border-t-0"
