@@ -2247,6 +2247,51 @@ export const discordGuildMembers = pgTable(
   ],
 );
 
+export const discordVerificationApplications = pgTable(
+  "discord_verification_applications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    guildId: text("guild_id")
+      .notNull()
+      .references(() => discordGuilds.id, { onDelete: "cascade" }),
+    discordUserId: text("discord_user_id").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    universityEmail: text("university_email").notNull(),
+    academicLevel: text("academic_level").notNull(),
+    duesMethod: text("dues_method").notNull().default("NOT_YET_PAID"),
+    status: text("status").notNull().default("PENDING_PORTAL_VERIFICATION"),
+    linkedMemberId: uuid("linked_member_id").references(() => members.id, {
+      onDelete: "set null",
+    }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedByMemberId: uuid("reviewed_by_member_id").references(
+      () => members.id,
+      { onDelete: "set null" },
+    ),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("discord_verification_application_identity_idx").on(
+      table.guildId,
+      table.discordUserId,
+    ),
+    index("discord_verification_application_status_idx").on(
+      table.status,
+      table.submittedAt,
+    ),
+  ],
+);
+
 export const discordLinkTokens = pgTable(
   "discord_link_tokens",
   {

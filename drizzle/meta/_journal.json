@@ -232,6 +232,13 @@
       "when": 1787678275211,
       "tag": "0032_cloudy_sersi",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787682966773,
+      "tag": "0033_brainy_vindicator",
+      "breakpoints": true
     }
   ]
 }

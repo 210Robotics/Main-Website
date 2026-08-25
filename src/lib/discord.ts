@@ -527,6 +527,8 @@ export async function syncDiscordDuesAccess({
       organizationRole: members.organizationRole,
       memberStatus: members.status,
       accessState: members.accessState,
+      firstName: members.firstName,
+      lastName: members.lastName,
       displayName: members.displayName,
       nicknameSyncEnabled: members.nicknameSyncEnabled,
       universityEmailVerifiedAt: members.universityEmailVerifiedAt,
@@ -652,11 +654,15 @@ export async function syncDiscordDuesAccess({
       }
     }
     let nicknameSynchronized = false;
+    const canonicalName = [row.firstName, row.lastName]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(" ") || row.displayName;
     if (
       row.discord.linkedMemberId &&
       row.nicknameSyncEnabled &&
-      row.displayName &&
-      row.discord.displayName !== row.displayName
+      canonicalName &&
+      row.discord.displayName !== canonicalName
     ) {
       try {
         await discordFetch(
@@ -668,7 +674,7 @@ export async function syncDiscordDuesAccess({
                 "210 Robotics canonical member name synchronization",
               ),
             },
-            body: JSON.stringify({ nick: row.displayName.slice(0, 32) }),
+            body: JSON.stringify({ nick: canonicalName.slice(0, 32) }),
           },
         );
         nicknameSynchronized = true;
@@ -682,7 +688,7 @@ export async function syncDiscordDuesAccess({
       .set({
         roles: [...currentRoles],
         displayName: nicknameSynchronized
-          ? row.displayName || row.discord.displayName
+          ? canonicalName || row.discord.displayName
           : row.discord.displayName,
         lastSynchronizedAt: synchronizedAt,
         roleSyncStatus: syncError ? "ERROR" : "SYNCED",
@@ -1783,6 +1789,99 @@ export async function sendDiscordChannelMessage({
     },
   });
   return { id: message.id, timestamp: message.timestamp, verified };
+}
+
+export async function publishDiscordVerificationPanel(guildId: string) {
+  if (!/^\d{15,22}$/.test(guildId)) {
+    throw new Error("A valid Discord server ID is required.");
+  }
+  const liveChannels = await discordFetch<DiscordChannel[]>(
+    `/guilds/${guildId}/channels`,
+  );
+  const rules = liveChannels.find(
+    (channel) =>
+      [0, 5].includes(channel.type) &&
+      (channel.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
+        "rulesandexpectations",
+  );
+  if (!rules) {
+    throw new Error("The bot cannot find #rules-and-expectations.");
+  }
+  const siteUrl = (
+    process.env.NEXT_PUBLIC_SITE_URL || "https://210robotics.com"
+  ).replace(/\/$/, "");
+  const posted = await discordFetch<{ id: string }>(
+    `/channels/${rules.id}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        embeds: [
+          {
+            title: "Verify your 210 Robotics membership",
+            description:
+              "Current and new members must complete the secure verification workflow before private team channels are unlocked. This protects robot designs, code, strategy, and internal documentation.",
+            color: 0xfd7803,
+            fields: [
+              {
+                name: "1 · School identity",
+                value:
+                  "Sign in to the 210 Robotics Portal and verify ownership of your **@my.utsa.edu** email through Clerk. Entering an address in Discord alone does not verify it.",
+              },
+              {
+                name: "2 · Team profile and Discord name",
+                value:
+                  "Submit your first name, last name, and academic level. After your portal identity is linked, the bot automatically synchronizes your server nickname to **First Last**.",
+              },
+              {
+                name: "3 · Membership dues or waiver",
+                value:
+                  "Access is eligible after confirmed annual/semester dues, including administrator-recorded Cash App or Zelle payments, an approved waiver, or **$100+ in finalized donations attributed to you**.",
+              },
+              {
+                name: "4 · Automatic access",
+                value:
+                  "Once the checklist is complete, the portal becomes the source of truth and the bot synchronizes the appropriate verified-member roles automatically.",
+              },
+            ],
+            footer: {
+              text: "Never send payment credentials, passwords, or verification codes through Discord.",
+            },
+          },
+        ],
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 1,
+                custom_id: "verification:start",
+                label: "Start verification application",
+                emoji: { name: "✅" },
+              },
+              {
+                type: 2,
+                style: 5,
+                label: "Open secure portal checklist",
+                url: `${siteUrl}/verify`,
+              },
+            ],
+          },
+        ],
+        allowed_mentions: { parse: [] },
+      }),
+    },
+  );
+  await recordDiscordEvent({
+    guildId,
+    kind: "VERIFICATION_PANEL_POSTED",
+    metadata: { channelId: rules.id, messageId: posted.id },
+  });
+  return {
+    messageId: posted.id,
+    channelId: rules.id,
+    channelName: rules.name || "rules-and-expectations",
+  };
 }
 
 export async function sendDiscordDirectMessage({

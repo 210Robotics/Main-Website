@@ -23,6 +23,7 @@ import {
   listDiscordVoiceChannels,
   normalizeDiscordReactionEmoji,
   processDiscordOnboarding,
+  publishDiscordVerificationPanel,
   registerDiscordCommands,
   sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
@@ -403,6 +404,20 @@ export async function postDiscordRecordingPolicy(formData: FormData) {
     entityType: "discord_message",
     entityId: sent.id,
     details: { guildId, channelId: rules.id },
+  });
+  revalidatePath("/admin");
+}
+
+export async function postDiscordVerificationPanel(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const posted = await publishDiscordVerificationPanel(guildId);
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_VERIFICATION_PANEL_POSTED",
+    entityType: "discord_message",
+    entityId: posted.messageId,
+    details: { guildId, channelId: posted.channelId },
   });
   revalidatePath("/admin");
 }
@@ -1531,7 +1546,16 @@ export async function addManualMembershipDuesPayment(formData: FormData) {
     throw new Error("Choose semester or annual coverage.");
   }
   const paymentMethod = required(formData, "paymentMethod").toUpperCase().slice(0, 80);
-  if (!["CASH", "CHECK", "UNIVERSITY_PAYMENT", "OTHER"].includes(paymentMethod)) {
+  if (
+    ![
+      "CASH",
+      "CASH_APP",
+      "ZELLE",
+      "CHECK",
+      "UNIVERSITY_PAYMENT",
+      "OTHER",
+    ].includes(paymentMethod)
+  ) {
     throw new Error("Choose a valid manual payment method.");
   }
   const paymentDate = optionalDate(formData.get("paymentDate")) || new Date();

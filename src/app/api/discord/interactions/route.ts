@@ -4,17 +4,20 @@ import { getDb } from "@/db";
 import {
   discordGuildMembers,
   discordGuilds,
+  discordVerificationApplications,
   membershipDues,
   members,
 } from "@/db/schema";
 import {
   createDiscordLinkToken,
   discordConfiguration,
+  publishDiscordVerificationPanel,
   recordDiscordEvent,
   sendDiscordCalendarReminders,
   sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminder,
   setDiscordGuildMemberTimeout,
+  syncDiscordDuesAccessForMember,
   syncDiscordGuild,
   syncDiscordMessages,
   upsertDiscordGuild,
@@ -34,6 +37,8 @@ import {
   parseDiscordDmActionId,
   parseDiscordDmModalId,
 } from "@/lib/discord-dm-interactions";
+import { parseDiscordVerificationApplication } from "@/lib/discord-verification";
+import { reconcileMemberMembership } from "@/lib/membership-access-server";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
 import { generateGeminiText } from "@/lib/team-ai";
 import {
@@ -140,10 +145,12 @@ async function sendInteractionFollowup({
   applicationId,
   token,
   content,
+  components,
 }: {
   applicationId: string;
   token: string;
   content: string;
+  components?: Array<Record<string, unknown>>;
 }) {
   const response = await fetch(
     `https://discord.com/api/v10/webhooks/${encodeURIComponent(applicationId)}/${encodeURIComponent(token)}`,
@@ -154,11 +161,222 @@ async function sendInteractionFollowup({
         content: content.trim().slice(0, 1_950),
         flags: 64,
         allowed_mentions: { parse: [] },
+        ...(components?.length ? { components } : {}),
       }),
     },
   );
   if (!response.ok)
     throw new Error(`Discord follow-up failed (${response.status}).`);
+}
+
+function verificationApplicationModal() {
+  return NextResponse.json({
+    type: 9,
+    data: {
+      custom_id: "verification:submit",
+      title: "210 Robotics verification",
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: "first_name",
+              label: "First name",
+              style: 1,
+              min_length: 1,
+              max_length: 60,
+              required: true,
+            },
+          ],
+        },
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: "last_name",
+              label: "Last name",
+              style: 1,
+              min_length: 1,
+              max_length: 60,
+              required: true,
+            },
+          ],
+        },
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: "university_email",
+              label: "UTSA student email",
+              style: 1,
+              min_length: 12,
+              max_length: 180,
+              required: true,
+              placeholder: "name@my.utsa.edu",
+            },
+          ],
+        },
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: "academic_level",
+              label: "Academic level",
+              style: 1,
+              min_length: 3,
+              max_length: 30,
+              required: true,
+              placeholder: "Freshman, Senior, Masters, Mentor...",
+            },
+          ],
+        },
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: "dues_method",
+              label: "Dues status or method",
+              style: 1,
+              min_length: 3,
+              max_length: 80,
+              required: true,
+              placeholder: "Cash App, Zelle, $100+ raised, or Not paid yet",
+            },
+          ],
+        },
+      ],
+    },
+  });
+}
+
+function modalValue(interaction: DiscordInteraction, customId: string) {
+  return (
+    interaction.data?.components
+      ?.flatMap((row) => row.components || [])
+      .find((component) => component.custom_id === customId)?.value || ""
+  );
+}
+
+function handleDiscordVerificationApplication(
+  interaction: DiscordInteraction,
+  user?: DiscordUser,
+) {
+  const guildId = interaction.guild_id || interaction.guild?.id || "";
+  const parsed = parseDiscordVerificationApplication({
+    firstName: modalValue(interaction, "first_name"),
+    lastName: modalValue(interaction, "last_name"),
+    universityEmail: modalValue(interaction, "university_email"),
+    academicLevel: modalValue(interaction, "academic_level"),
+    duesMethod: modalValue(interaction, "dues_method"),
+  });
+  if (!guildId || !user) {
+    return interactionResponse(
+      "Open this application inside the 210 Robotics Discord server.",
+    );
+  }
+  if (!parsed.success) return interactionResponse(parsed.message);
+  const applicationId =
+    interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+  const interactionToken = interaction.token || "";
+  if (!applicationId || !interactionToken) {
+    return interactionResponse(
+      "Discord did not provide enough information to save this application.",
+    );
+  }
+  after(async () => {
+    try {
+      await upsertDiscordGuild({ guildId, name: interaction.guild?.name });
+      const guildMember = await upsertDiscordMember({
+        guildId,
+        user,
+        displayName:
+          interaction.member?.nick || user.global_name || user.username,
+        roles: interaction.member?.roles,
+        joinedAt: interaction.member?.joined_at,
+      });
+      const now = new Date();
+      await getDb()
+        .insert(discordVerificationApplications)
+        .values({
+          guildId,
+          discordUserId: user.id,
+          ...parsed.data,
+          linkedMemberId: guildMember.linkedMemberId,
+          status: "PENDING_PORTAL_VERIFICATION",
+          submittedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            discordVerificationApplications.guildId,
+            discordVerificationApplications.discordUserId,
+          ],
+          set: {
+            ...parsed.data,
+            linkedMemberId: guildMember.linkedMemberId,
+            status: "PENDING_PORTAL_VERIFICATION",
+            submittedAt: now,
+            updatedAt: now,
+          },
+        });
+
+      let portalUrl: string;
+      if (guildMember.linkedMemberId) {
+        await reconcileMemberMembership(guildMember.linkedMemberId);
+        await syncDiscordDuesAccessForMember(
+          guildMember.linkedMemberId,
+        ).catch((error) => {
+          console.error("Verification nickname/role sync failed", error);
+        });
+        portalUrl = "https://210robotics.com/verify";
+      } else {
+        portalUrl = await createDiscordLinkToken({
+          guildId,
+          discordUserId: user.id,
+          username: user.username,
+        });
+      }
+      await recordDiscordEvent({
+        guildId,
+        discordUserId: user.id,
+        kind: "VERIFICATION_APPLICATION_SUBMITTED",
+        metadata: {
+          linked: Boolean(guildMember.linkedMemberId),
+          academicLevel: parsed.data.academicLevel,
+          declaredDuesMethod: parsed.data.duesMethod,
+        },
+      });
+      await sendInteractionFollowup({
+        applicationId,
+        token: interactionToken,
+        content:
+          "Your application was saved. Finish the secure portal checklist to verify your @my.utsa.edu account and link this Discord identity. Cash App or Zelle payments require officer confirmation; the $100 fundraising waiver uses finalized donations attributed to your member account.",
+        components: linkButton(
+          guildMember.linkedMemberId
+            ? "Continue verification"
+            : "Sign in / sign up and link Discord",
+          portalUrl,
+        ),
+      });
+    } catch (error) {
+      console.error("Discord verification application failed", error);
+      await sendInteractionFollowup({
+        applicationId,
+        token: interactionToken,
+        content:
+          "The application could not be saved right now. Your membership was not changed. Please try again or continue at https://210robotics.com/verify.",
+        components: linkButton(
+          "Open secure verification",
+          "https://210robotics.com/verify",
+        ),
+      }).catch(() => undefined);
+    }
+  });
+  return deferredInteractionResponse();
 }
 
 async function authorizeDiscordDmDecision(user?: DiscordUser) {
@@ -341,9 +559,15 @@ export async function POST(request: Request) {
   if (interaction.type === 1) return NextResponse.json({ type: 1 });
   const user = interaction.member?.user || interaction.user;
   if (interaction.type === 3) {
+    if (interaction.data?.custom_id === "verification:start") {
+      return verificationApplicationModal();
+    }
     return handleDiscordDmChoice(interaction, user);
   }
   if (interaction.type === 5) {
+    if (interaction.data?.custom_id === "verification:submit") {
+      return handleDiscordVerificationApplication(interaction, user);
+    }
     return handleDiscordDmManualReply(interaction, user);
   }
   if (interaction.type !== 2) {
@@ -457,6 +681,7 @@ export async function POST(request: Request) {
         "timeout",
         "stopall",
         "voice",
+        "verification-panel",
       ].includes(commandName) &&
       !isAdministrator(interaction.member?.permissions)
     ) {
@@ -561,6 +786,38 @@ export async function POST(request: Request) {
             applicationId,
             token: interactionToken,
             content: `/${commandName} could not finish. Review the Discord integration status in the Admin Portal and try again.`,
+          }).catch(() => undefined);
+        }
+      });
+      return deferredInteractionResponse();
+    }
+
+    if (commandName === "verification-panel") {
+      const applicationId =
+        interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+      const interactionToken = interaction.token || "";
+      if (!applicationId || !interactionToken) {
+        return interactionResponse(
+          "Discord did not provide enough information to post the verification panel.",
+        );
+      }
+      after(async () => {
+        try {
+          const result = await publishDiscordVerificationPanel(guildId);
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content: `The member verification application was posted in #${result.channelName}.`,
+          });
+        } catch (error) {
+          console.error("Discord verification panel command failed", error);
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content:
+              error instanceof Error
+                ? error.message
+                : "The verification application could not be posted.",
           }).catch(() => undefined);
         }
       });
@@ -850,7 +1107,7 @@ export async function POST(request: Request) {
       );
     }
     return interactionResponse(
-      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /logs, /calendar, /digest, /timeout, /register, /status, /dues, or /team.",
+      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /logs, /calendar, /digest, /timeout, /verification-panel, /register, /status, /dues, or /team.",
     );
   } catch (error) {
     console.error("Discord interaction failed", error);

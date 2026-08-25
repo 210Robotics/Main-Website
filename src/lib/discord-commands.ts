@@ -127,4 +127,9 @@ export const discordApplicationCommands = [
     description: "Connect this server to the 210 Robotics admin portal",
     default_member_permissions: "8",
   },
+  {
+    name: "verification-panel",
+    description: "Post the member verification application in the rules channel",
+    default_member_permissions: "8",
+  },
 ] as const;

@@ -18,11 +18,13 @@ import {
   discordGuildMembers,
   discordGuilds,
   discordMessages,
+  discordVerificationApplications,
   members,
 } from "@/db/schema";
 import {
   registerDiscordCommandsAction,
   postDiscordRecordingPolicy,
+  postDiscordVerificationPanel,
   processDiscordOnboardingNow,
   retryDiscordOnboardingRoles,
   saveDiscordDuesAccessSettings,
@@ -114,6 +116,7 @@ export async function DiscordAdminPanel({
     reminderRows,
     liveVoiceChannels,
     guildRoles,
+    verificationApplications,
   ] = await Promise.all([
     guild
       ? getDb()
@@ -244,6 +247,14 @@ export async function DiscordAdminPanel({
           console.error("Discord role refresh failed", error);
           return [];
         })
+      : Promise.resolve([]),
+    guild
+      ? getDb()
+          .select()
+          .from(discordVerificationApplications)
+          .where(eq(discordVerificationApplications.guildId, guild.id))
+          .orderBy(desc(discordVerificationApplications.submittedAt))
+          .limit(100)
       : Promise.resolve([]),
   ]);
   const linked = discordMembers.filter((row) => row.discord.linkedMemberId);
@@ -1211,6 +1222,30 @@ export async function DiscordAdminPanel({
           />
           <div className="mt-6 border-t border-[#303030] pt-5">
             <p className="text-sm font-bold text-white">
+              Member verification application
+            </p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
+              Post the current/new-member verification embed in
+              #rules-and-expectations. Its button opens a Discord application,
+              then directs the member to Clerk for verified UTSA identity,
+              account linking, and confirmed dues or fundraising-waiver review.
+            </p>
+            <ActionForm
+              action={postDiscordVerificationPanel}
+              successMessage="Verification application posted in #rules-and-expectations."
+              className="mt-3"
+            >
+              <input type="hidden" name="guildId" value={guild.id} />
+              <button
+                className="button w-full justify-center sm:w-auto"
+                disabled={!configuration.botToken}
+              >
+                Post verification application
+              </button>
+            </ActionForm>
+          </div>
+          <div className="mt-6 border-t border-[#303030] pt-5">
+            <p className="text-sm font-bold text-white">
               Permanent Discord recording policy
             </p>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
@@ -1526,6 +1561,58 @@ export async function DiscordAdminPanel({
           <Metric value={unlinked.length} label="Discord only" />
           <Metric value={websiteOnlyMembers.length} label="Portal only" />
         </div>
+
+        <details className="mt-5 border border-[#343434] bg-[#0d0d0d]">
+          <summary className="cursor-pointer p-4 text-sm font-bold sm:p-5">
+            Verification applications ({verificationApplications.length})
+          </summary>
+          <div className="grid gap-3 border-t border-[#303030] p-4 lg:grid-cols-2 sm:p-5">
+            {verificationApplications.map((application) => (
+              <article
+                className="min-w-0 border border-[#343434] bg-[#101010] p-4"
+                key={application.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <strong className="block truncate">
+                      {application.firstName} {application.lastName}
+                    </strong>
+                    <span className="block truncate text-xs text-[#777]">
+                      {application.universityEmail}
+                    </span>
+                  </div>
+                  <span className="tag border-amber-800 text-amber-300">
+                    {application.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-[#888]">
+                  <div>
+                    <dt className="text-[#666]">Academic level</dt>
+                    <dd>{application.academicLevel}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[#666]">Declared dues method</dt>
+                    <dd>{application.duesMethod.replaceAll("_", " ")}</dd>
+                  </div>
+                  <div className="col-span-2">
+                    <dt className="text-[#666]">Submitted</dt>
+                    <dd>{formatDate(application.submittedAt)}</dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs leading-5 text-[#777]">
+                  {application.linkedMemberId
+                    ? "Discord is linked. Clerk verification and the authoritative dues ledger still determine access."
+                    : "Awaiting secure portal account linking. This Discord form does not verify identity or payment."}
+                </p>
+              </article>
+            ))}
+            {!verificationApplications.length && (
+              <p className="text-sm text-[#777]">
+                No Discord verification applications have been submitted yet.
+              </p>
+            )}
+          </div>
+        </details>
 
         <details className="mt-5 border border-[#343434] bg-[#0d0d0d]" open>
           <summary className="cursor-pointer p-4 text-sm font-bold sm:p-5">
