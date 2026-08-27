@@ -529,6 +529,7 @@ async function setDiscordMembershipTierAccess({
   unpaidRoleId,
   enabled,
   memberAccess,
+  managedRoleIds,
 }: {
   guildId: string;
   roles: DiscordRole[];
@@ -537,7 +538,12 @@ async function setDiscordMembershipTierAccess({
   paidRoleId: string;
   unpaidRoleId: string;
   enabled: boolean;
-  memberAccess: Array<{ discordUserId: string; verified: boolean }>;
+  managedRoleIds: string[];
+  memberAccess: Array<{
+    discordUserId: string;
+    verified: boolean;
+    requiresOverride: boolean;
+  }>;
 }) {
   const channels = await discordFetch<DiscordChannel[]>(
     `/guilds/${guildId}/channels`,
@@ -573,7 +579,14 @@ async function setDiscordMembershipTierAccess({
   const leadershipRoles = roles.filter(discordLeadershipRole);
   const executiveRoles = roles.filter(discordExecutiveRole);
   const teamLeadRoles = roles.filter(discordTeamLeadRole);
-  const interestRoles = roles.filter(isDiscordInterestRole);
+  const tierRoleIds = new Set(managedRoleIds);
+  const neutralRoles = roles.filter(
+    (role) =>
+      !role.managed &&
+      role.id !== guildId &&
+      !tierRoleIds.has(role.id) &&
+      !discordLeadershipRole(role),
+  );
   const permissionTargets = channels.filter((channel) => {
     if (channel.type === 4) return true;
     return (
@@ -629,12 +642,12 @@ async function setDiscordMembershipTierAccess({
     // Interest roles describe a member's interests; they never grant access.
     // Clearing their View Channel overwrite prevents a reaction role from
     // bypassing verification or dues gates.
-    for (const role of interestRoles) {
+    for (const role of neutralRoles) {
       await updateDiscordPermissionOverwrite({
         channel,
         targetId: role.id,
         clearBits: tierPermissionBits,
-        reason: "210 Robotics interest roles do not grant channel access",
+        reason: "210 Robotics descriptive roles do not grant channel access",
       });
     }
     await updateDiscordPermissionOverwrite({
@@ -706,6 +719,11 @@ async function setDiscordMembershipTierAccess({
     }
     if (enabled && !isStart) restricted += 1;
     for (const member of memberAccess) {
+      const existingMemberOverwrite = channel.permission_overwrites?.some(
+        (overwrite) =>
+          overwrite.id === member.discordUserId && overwrite.type === 1,
+      );
+      if (!member.requiresOverride && !existingMemberOverwrite) continue;
       await updateDiscordPermissionOverwrite({
         channel,
         targetId: member.discordUserId,
@@ -934,7 +952,11 @@ export async function syncDiscordDuesAccess({
   const memberPermissionStates: Array<{
     discordUserId: string;
     verified: boolean;
+    requiresOverride: boolean;
   }> = [];
+  const leadershipRoleIds = new Set(
+    roleState.roles.filter(discordLeadershipRole).map((role) => role.id),
+  );
   for (const row of memberRows) {
     const currentRoles = new Set(row.discord.roles);
     const isExempt = memberIsDuesExempt({
@@ -968,6 +990,9 @@ export async function syncDiscordDuesAccess({
     memberPermissionStates.push({
       discordUserId: row.discord.discordUserId,
       verified: identityEligible || isExempt,
+      requiresOverride:
+        !(identityEligible || isExempt) &&
+        row.discord.roles.some((roleId) => leadershipRoleIds.has(roleId)),
     });
     const hasFullAccess =
       isExempt ||
@@ -1123,6 +1148,14 @@ export async function syncDiscordDuesAccess({
       unpaidRoleId: roleState.unpaidRole.id,
       enabled,
       memberAccess: memberPermissionStates,
+      managedRoleIds: [
+        roleState.paidRole.id,
+        roleState.unpaidRole.id,
+        roleState.unverifiedRole.id,
+        roleState.utsaVerifiedRole.id,
+        roleState.verifiedMemberRole.id,
+        roleState.suspendedRole.id,
+      ],
     });
     sensitiveAreaResult = await setDiscordSensitiveAreaAccess({
       guildId,
