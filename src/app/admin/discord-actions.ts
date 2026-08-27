@@ -1552,6 +1552,8 @@ export async function saveMembershipSettings(formData: FormData) {
   const fundraisingWaiverThresholdCents = cents(formData, "fundraisingWaiverThreshold");
   const gracePeriodDays = Math.max(0, Math.min(180, Number(formData.get("gracePeriodDays") || 0)));
   const accessEnforcementEnabled = formData.get("accessEnforcementEnabled") === "on";
+  const stripeDuesPaymentsEnabled =
+    formData.get("stripeDuesPaymentsEnabled") === "on";
   await getDb()
     .insert(membershipSettings)
     .values({
@@ -1562,6 +1564,7 @@ export async function saveMembershipSettings(formData: FormData) {
       fundraisingWaiverThresholdCents,
       gracePeriodDays,
       accessEnforcementEnabled,
+      stripeDuesPaymentsEnabled,
       updatedByMemberId: actor.id,
       updatedAt: new Date(),
     })
@@ -1574,6 +1577,7 @@ export async function saveMembershipSettings(formData: FormData) {
         fundraisingWaiverThresholdCents,
         gracePeriodDays,
         accessEnforcementEnabled,
+        stripeDuesPaymentsEnabled,
         updatedByMemberId: actor.id,
         updatedAt: new Date(),
       },
@@ -1590,6 +1594,7 @@ export async function saveMembershipSettings(formData: FormData) {
       fundraisingWaiverThresholdCents,
       gracePeriodDays,
       accessEnforcementEnabled,
+      stripeDuesPaymentsEnabled,
     },
   });
   revalidatePath("/admin");

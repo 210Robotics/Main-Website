@@ -2516,6 +2516,9 @@ export const membershipSettings = pgTable("membership_settings", {
   accessEnforcementEnabled: boolean("access_enforcement_enabled")
     .notNull()
     .default(false),
+  stripeDuesPaymentsEnabled: boolean("stripe_dues_payments_enabled")
+    .notNull()
+    .default(false),
   updatedByMemberId: uuid("updated_by_member_id").references(
     () => members.id,
     { onDelete: "set null" },

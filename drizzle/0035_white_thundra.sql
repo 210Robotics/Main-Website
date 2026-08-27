@@ -1,0 +1,1 @@
+ALTER TABLE "membership_settings" ADD COLUMN "stripe_dues_payments_enabled" boolean DEFAULT false NOT NULL;

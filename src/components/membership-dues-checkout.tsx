@@ -28,6 +28,7 @@ export function MembershipDuesCheckout({
   fundraisingThresholdCents,
   payments,
   publishableKey,
+  stripePaymentsEnabled,
 }: {
   duesId: string;
   period: string;
@@ -47,6 +48,7 @@ export function MembershipDuesCheckout({
     receiptNumber: string | null;
   }>;
   publishableKey: string;
+  stripePaymentsEnabled: boolean;
 }) {
   const router = useRouter();
   const stripePromise = useMemo(
@@ -171,6 +173,17 @@ export function MembershipDuesCheckout({
         <div className="mt-6 border border-amber-900/60 bg-amber-950/20 p-4 text-sm leading-6 text-amber-100/75">
           This dues record does not have a payable balance yet. Contact an
           officer to confirm the amount due.
+        </div>
+      ) : !stripePaymentsEnabled ? (
+        <div className="mt-6 border border-amber-900/60 bg-amber-950/20 p-4 text-sm leading-6 text-amber-100/75">
+          <strong className="block text-amber-100">
+            Online dues payments are currently disabled.
+          </strong>
+          <span className="mt-1 block">
+            Contact a finance officer for Cash App, Zelle, cash, check, or
+            another approved payment option. Your balance and payment history
+            will update here after the payment is recorded.
+          </span>
         </div>
       ) : (
         <div className="mt-6">

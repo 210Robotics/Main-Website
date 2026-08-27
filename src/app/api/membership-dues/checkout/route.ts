@@ -1,7 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { membershipDues, membershipDuesPayments } from "@/db/schema";
+import {
+  membershipDues,
+  membershipDuesPayments,
+  membershipSettings,
+} from "@/db/schema";
 import { requireActiveMember } from "@/lib/auth";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
 import { getStripe, stripeIsConfigured } from "@/lib/stripe";
@@ -17,6 +21,20 @@ export async function POST(request: Request) {
     return Response.json(
       { message: "Choose a valid membership-dues record." },
       { status: 400 },
+    );
+  }
+  const [settings] = await getDb()
+    .select({ enabled: membershipSettings.stripeDuesPaymentsEnabled })
+    .from(membershipSettings)
+    .where(eq(membershipSettings.id, "membership"))
+    .limit(1);
+  if (!settings?.enabled) {
+    return Response.json(
+      {
+        message:
+          "Online card payments for membership dues are currently disabled. Contact a finance officer for payment options.",
+      },
+      { status: 403 },
     );
   }
   if (!stripeIsConfigured()) {

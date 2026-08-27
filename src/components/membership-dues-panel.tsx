@@ -76,6 +76,7 @@ export async function MembershipDuesPanel({
     fundraisingWaiverThresholdCents: 10_000,
     gracePeriodDays: 30,
     accessEnforcementEnabled: false,
+    stripeDuesPaymentsEnabled: false,
   };
   const totalDue = rows.reduce(
     (total, row) => total + (row.dues?.amountDueCents ?? 0),
@@ -163,6 +164,24 @@ export async function MembershipDuesPanel({
           <label className="flex gap-3 border border-[#333] p-4 text-sm sm:col-span-2 xl:col-span-4">
             <input type="checkbox" name="accessEnforcementEnabled" defaultChecked={settings.accessEnforcementEnabled} />
             <span><strong className="block text-white">Enforce verified membership access</strong><small className="mt-1 block leading-5 text-[#888]">Leave off during migration. When enabled, server authorization and Discord provisioning use the verified profile, dues, waiver, and suspension state.</small></span>
+          </label>
+          <label className="flex gap-3 border border-[#333] p-4 text-sm sm:col-span-2 xl:col-span-4">
+            <input
+              type="checkbox"
+              name="stripeDuesPaymentsEnabled"
+              defaultChecked={settings.stripeDuesPaymentsEnabled}
+            />
+            <span>
+              <strong className="block text-white">
+                Allow online Stripe payments for membership dues
+              </strong>
+              <small className="mt-1 block leading-5 text-[#888]">
+                Currently {settings.stripeDuesPaymentsEnabled ? "enabled" : "disabled"}.
+                When off, members can still view balances and receipts, while
+                finance officers record Cash App, Zelle, cash, check, or other
+                verified payments manually.
+              </small>
+            </span>
           </label>
           <button className="button justify-center xl:self-end">Save membership settings</button>
         </ActionForm>

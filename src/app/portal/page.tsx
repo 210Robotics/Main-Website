@@ -25,6 +25,7 @@ import {
   manufacturingSteps,
   membershipDues,
   membershipDuesPayments,
+  membershipSettings,
   designChanges,
   operationsHubRecords,
   scoutingMatches,
@@ -395,6 +396,16 @@ export default async function PortalPage({
         .orderBy(desc(membershipDuesPayments.paymentDate), desc(membershipDuesPayments.createdAt))
         .limit(50)
     : [];
+  const [duesSettings] = load.dues
+    ? await getDb()
+        .select({
+          stripeDuesPaymentsEnabled:
+            membershipSettings.stripeDuesPaymentsEnabled,
+        })
+        .from(membershipSettings)
+        .where(eq(membershipSettings.id, "membership"))
+        .limit(1)
+    : [];
   const completedPolls = completedPollRows.filter(
     ({ poll }, index, rows) =>
       rows.findIndex((candidate) => candidate.poll.id === poll.id) === index,
@@ -580,6 +591,9 @@ export default async function PortalPage({
                 receiptNumber: payment.receiptNumber,
               }))}
               publishableKey={process.env.STRIPE_PUBLISHABLE_KEY ?? ""}
+              stripePaymentsEnabled={
+                duesSettings?.stripeDuesPaymentsEnabled ?? false
+              }
             />
           ) : (
             <section className="card p-6 sm:p-8">
