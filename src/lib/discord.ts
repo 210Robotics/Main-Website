@@ -622,26 +622,31 @@ export async function syncDiscordDuesAccess({
         row.duesStatus === "WAIVED_FUNDRAISING" ||
         (row.amountDueCents ?? 0) > 0 &&
           (row.amountPaidCents ?? 0) >= (row.amountDueCents ?? 0));
-    const isEntitled =
-      isExempt ||
-      (row.memberStatus === "ACTIVE" &&
-        (["ACTIVE_MEMBER", "WAIVED_MEMBER", "MENTOR"].includes(
-          row.accessState || "",
-        ) ||
-          Boolean(
-            row.gracePeriodEndsAt && row.gracePeriodEndsAt >= new Date(),
-          )));
-    const desiredRoleId =
-      !enabled || isExempt
-        ? null
-        : !isEntitled
-          ? roleState.unpaidRole.id
-          : isPaid
-            ? roleState.paidRole.id
-            : null;
+    const gracePeriodActive = Boolean(
+      row.gracePeriodEndsAt && row.gracePeriodEndsAt >= new Date(),
+    );
     const universityVerified = Boolean(
       row.universityEmailVerifiedAt || row.universityEmailOverrideAt,
     );
+    const profileEligible =
+      row.memberStatus === "ACTIVE" &&
+      ["ACTIVE_MEMBER", "WAIVED_MEMBER", "MENTOR"].includes(
+        row.accessState || "",
+      );
+    const hasFullAccess =
+      isExempt ||
+      (Boolean(row.discord.linkedMemberId) &&
+        universityVerified &&
+        profileEligible &&
+        (isPaid || gracePeriodActive));
+    const desiredRoleId =
+      !enabled || isExempt
+        ? null
+        : hasFullAccess
+          ? isPaid
+            ? roleState.paidRole.id
+            : null
+          : roleState.unpaidRole.id;
     const semanticRoleIds = new Set<string>();
     if (row.memberStatus === "SUSPENDED") {
       semanticRoleIds.add(roleState.suspendedRole.id);
@@ -747,7 +752,7 @@ export async function syncDiscordDuesAccess({
         .where(eq(members.id, row.discord.linkedMemberId));
     }
     if (!enabled || isExempt) exempt += 1;
-    else if (isEntitled) paid += 1;
+    else if (hasFullAccess) paid += 1;
     else unpaid += 1;
   }
 
