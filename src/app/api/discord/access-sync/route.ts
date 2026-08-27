@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { syncDiscordDuesAccess } from "@/lib/discord";
+import { getDb } from "@/db";
+import { discordEvents } from "@/db/schema";
+import {
+  publishDiscordReactionRolePanel,
+  publishDiscordVerificationPanel,
+  syncDiscordDuesAccess,
+} from "@/lib/discord";
 import { discordWorkerRequestIsAuthorized } from "@/lib/discord-worker-auth";
 
 export const runtime = "nodejs";
@@ -25,12 +32,42 @@ export async function POST(request: Request) {
     );
   }
   try {
-    return NextResponse.json(
-      await syncDiscordDuesAccess({
-        guildId: parsed.data.guildId,
-        configureChannels: true,
-      }),
-    );
+    const access = await syncDiscordDuesAccess({
+      guildId: parsed.data.guildId,
+      configureChannels: true,
+    });
+    const [existingVerificationPanel] = await getDb()
+      .select({ id: discordEvents.id })
+      .from(discordEvents)
+      .where(
+        and(
+          eq(discordEvents.guildId, parsed.data.guildId),
+          eq(discordEvents.kind, "VERIFICATION_PANEL_POSTED"),
+        ),
+      )
+      .limit(1);
+    const verificationPanel = existingVerificationPanel
+      ? { status: "EXISTS" as const }
+      : await publishDiscordVerificationPanel(parsed.data.guildId)
+          .then((result) => ({ status: "POSTED" as const, ...result }))
+          .catch((error) => ({
+            status: "WARNING" as const,
+            reason: error instanceof Error ? error.message : String(error),
+          }));
+    const reactionRoles = await publishDiscordReactionRolePanel({
+      guildId: parsed.data.guildId,
+    })
+      .then((result) => ({
+        status: "READY" as const,
+        channelId: result.channelId,
+        messageId: result.messageId,
+        roleCount: result.mappings.length,
+      }))
+      .catch((error) => ({
+        status: "WARNING" as const,
+        reason: error instanceof Error ? error.message : String(error),
+      }));
+    return NextResponse.json({ access, verificationPanel, reactionRoles });
   } catch (error) {
     console.error("Discord membership access sync failed", {
       guildId: parsed.data.guildId,
