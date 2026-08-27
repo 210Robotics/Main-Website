@@ -216,19 +216,40 @@ async function discordFetch<T>(
   if (!(init.body instanceof FormData)) {
     requestHeaders["Content-Type"] = "application/json";
   }
-  const response = await fetch(`${DISCORD_API}${path}`, {
-    ...init,
-    headers: requestHeaders,
-    cache: "no-store",
-  });
-  if (!response.ok) {
+  for (let attempt = 0; attempt <= 4; attempt += 1) {
+    const response = await fetch(`${DISCORD_API}${path}`, {
+      ...init,
+      headers: requestHeaders,
+      cache: "no-store",
+    });
+    if (response.ok) {
+      if (response.status === 204) return undefined as T;
+      return (await response.json()) as T;
+    }
     const detail = (await response.text()).slice(0, 500);
+    if (response.status === 429 && attempt < 4) {
+      let retryAfterSeconds = Number(response.headers.get("retry-after") || 0);
+      try {
+        const parsed = JSON.parse(detail) as { retry_after?: unknown };
+        const bodyRetryAfter = Number(parsed.retry_after || 0);
+        if (Number.isFinite(bodyRetryAfter) && bodyRetryAfter > 0) {
+          retryAfterSeconds = bodyRetryAfter;
+        }
+      } catch {
+        // Discord can return a non-JSON proxy response. The header remains valid.
+      }
+      const delayMs = Math.min(
+        30_000,
+        Math.max(250, Math.ceil(retryAfterSeconds * 1_000) + 100),
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
     throw new Error(
       `Discord API request failed (${response.status}): ${detail}`,
     );
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  throw new Error("Discord API request could not be completed after retries.");
 }
 
 export async function upsertDiscordGuild({
