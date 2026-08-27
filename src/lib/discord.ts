@@ -624,17 +624,22 @@ async function setDiscordSensitiveAreaAccess({
       )
       .map((channel) => channel.id),
   );
-  const leadershipChannels = channels.filter(
-    (channel) =>
+  const leadershipChannels = channels.filter((channel) => {
+    const name = normalizedDiscordName(channel.name || "");
+    return (
       leadershipCategories.has(channel.id) ||
-      Boolean(channel.parent_id && leadershipCategories.has(channel.parent_id)),
-  );
+      (!channel.parent_id &&
+        channel.type !== 4 &&
+        /\b(leadership|officers?|executive|board)\b/.test(name))
+    );
+  });
   const announcementChannels = channels.filter((channel) => {
     const name = normalizedDiscordName(channel.name || "");
     return (
       announcementCategories.has(channel.id) ||
-      Boolean(channel.parent_id && announcementCategories.has(channel.parent_id)) ||
-      (channel.type !== 4 && /\bannouncements?\b/.test(name))
+      (!channel.parent_id &&
+        channel.type !== 4 &&
+        /\bannouncements?\b/.test(name))
     );
   });
   const leadershipRoles = roles.filter(discordLeadershipRole);
