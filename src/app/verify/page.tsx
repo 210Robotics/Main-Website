@@ -3,12 +3,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { VerificationProfileForm } from "@/components/verification-profile-form";
+import { UtsaEmailVerification } from "@/components/utsa-email-verification";
 import {
   getCurrentMember,
   synchronizeCurrentMemberIdentity,
 } from "@/lib/auth";
 import { reconcileMemberMembership } from "@/lib/membership-access-server";
-import { refreshUniversityVerification } from "@/app/verify/actions";
 
 export const metadata: Metadata = { title: "Verify Membership" };
 export const dynamic = "force-dynamic";
@@ -38,7 +38,10 @@ export default async function VerifyMembershipPage() {
             <p className="eyebrow">Secure member onboarding</p>
             <h1 className="mt-4 text-3xl font-bold tracking-[-.04em] sm:text-5xl">Verify your 210 Robotics membership.</h1>
             <p className="mt-5 max-w-3xl leading-7 text-[#bbb]">
-              Team designs, programming, and competition strategy are available after identity, profile, Discord, and membership checks are complete.
+              Verify your UTSA email, enter your real first and last name, and
+              connect Discord to unlock regular team channels. Paying or
+              waiving dues additionally unlocks Build and Systems/programming;
+              Leadership remains restricted to authorized officers.
             </p>
           </div>
           <div className="p-6 sm:p-9">
@@ -58,15 +61,21 @@ export default async function VerifyMembershipPage() {
             <p className="mt-5 rounded-sm border border-[#343434] bg-[#0b0b0b] p-4 text-sm leading-6 text-[#aaa]">
               {snapshot.reason}
             </p>
+            {snapshot.universityVerified &&
+              snapshot.profileComplete &&
+              snapshot.discordLinked &&
+              !["PAID", "WAIVED", "WAIVED_FUNDRAISING"].includes(
+                snapshot.duesStatus,
+              ) && (
+                <p className="mt-3 text-xs leading-5 text-[#999]">
+                  Your identity is verified, so regular team access can be
+                  synchronized now. Complete dues to unlock Build and
+                  Systems/programming channels.
+                </p>
+              )}
           </div>
           {!snapshot.universityVerified && (
-            <div className="card p-6">
-              <h2 className="text-lg font-bold">Verify your UTSA email</h2>
-              <p className="mt-3 text-sm leading-6 text-[#aaa]">Add and verify your @my.utsa.edu address in the account menu, then refresh this check.</p>
-              <form action={refreshUniversityVerification}>
-                <button className="button secondary mt-5 w-full">Refresh email verification</button>
-              </form>
-            </div>
+            <UtsaEmailVerification />
           )}
           {!snapshot.discordLinked && (
             <Link className="button justify-center" href="/api/discord/oauth/start">Connect Discord securely</Link>

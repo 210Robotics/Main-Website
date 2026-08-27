@@ -67,7 +67,10 @@ import {
   listDiscordGuildRoles,
   listDiscordVoiceChannels,
 } from "@/lib/discord";
-import { inferDiscordOnboardingRoleIds } from "@/lib/discord-role-selection";
+import {
+  inferDiscordOnboardingRoleIds,
+  isDiscordInterestRole,
+} from "@/lib/discord-role-selection";
 import { discordVoiceWorkerConfiguration } from "@/lib/discord-voice-worker";
 
 function formatDate(value: Date | null) {
@@ -411,6 +414,21 @@ export async function DiscordAdminPanel({
   const selectableGuildRoles = guildRoles.filter(
     (role) => !role.managed && role.name !== "@everyone",
   );
+  const interestGuildRoles = selectableGuildRoles.filter(
+    isDiscordInterestRole,
+  );
+  const reactionRoleRows = [
+    ...(reactionRolePanel?.mappings || []),
+    ...Array.from(
+      {
+        length: Math.max(
+          3,
+          8 - (reactionRolePanel?.mappings.length || 0),
+        ),
+      },
+      () => ({ emoji: "", roleId: "", roleName: "" }),
+    ),
+  ].slice(0, 12);
   const awaitingSecurityDelay = discordMembers.filter(
     ({ discord }) =>
       discord.securityDelayEndsAt &&
@@ -973,16 +991,37 @@ export async function DiscordAdminPanel({
                 </select>
                 <button className="button justify-center">Send private DMs</button>
               </ActionForm>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <ActionForm
+                  action={sendDiscordMembershipReminderGroup}
+                  successMessage="Verification DMs sent."
+                >
+                  <input type="hidden" name="guildId" value={guild.id} />
+                  <input type="hidden" name="group" value="UNVERIFIED" />
+                  <button className="button secondary w-full justify-center">
+                    DM unverified members
+                  </button>
+                </ActionForm>
+                <ActionForm
+                  action={sendDiscordMembershipReminderGroup}
+                  successMessage="Dues reminder DMs sent."
+                >
+                  <input type="hidden" name="guildId" value={guild.id} />
+                  <input type="hidden" name="group" value="DUES" />
+                  <button className="button secondary w-full justify-center">
+                    DM dues reminders
+                  </button>
+                </ActionForm>
+              </div>
             </div>
             <div className="border border-[#343434] bg-black/25 p-4 sm:p-5">
               <p className="text-sm font-bold text-white">
                 Safe team-interest reaction roles
               </p>
               <p className="mt-2 text-xs leading-5 text-[#888]">
-                Publish or update the message in #roles. Leave the list blank
-                to detect safe interests automatically, or enter mappings such
-                as <code>🔧=Mechanical, ⚡=Electrical</code>. Leadership,
-                permission, payment, and verification roles are always blocked.
+                Choose from actual basic roles already present in Discord.
+                Leadership, VP, lead, administrative, payment, verification,
+                and managed roles never appear in this editor.
               </p>
               <ActionForm
                 action={postDiscordReactionRolePanel}
@@ -990,21 +1029,49 @@ export async function DiscordAdminPanel({
                 className="mt-4 grid gap-3"
               >
                 <input type="hidden" name="guildId" value={guild.id} />
-                <textarea
-                  className="input min-h-24"
-                  name="mappingSpec"
-                  maxLength={1_800}
-                  placeholder="🔧=Mechanical, ⚡=Electrical, 💻=Programming"
-                  defaultValue={(reactionRolePanel?.mappings || [])
-                    .map((mapping) => `${mapping.emoji}=${mapping.roleName}`)
-                    .join(", ")}
-                />
+                <div className="overflow-hidden border border-[#333]">
+                  <div className="hidden grid-cols-[100px_minmax(0,1fr)] gap-3 border-b border-[#333] bg-[#171717] px-3 py-2 text-xs font-bold uppercase tracking-[.08em] text-[#888] sm:grid">
+                    <span>Emoji</span>
+                    <span>Basic Discord role</span>
+                  </div>
+                  {reactionRoleRows.map((mapping, index) => (
+                    <div
+                      className="grid gap-2 border-b border-[#292929] p-3 last:border-b-0 sm:grid-cols-[100px_minmax(0,1fr)]"
+                      key={`${mapping.roleId || "new"}-${index}`}
+                    >
+                      <label className="field">
+                        <span className="sm:sr-only">Emoji</span>
+                        <input
+                          className="input text-center text-lg"
+                          name="reactionEmoji"
+                          defaultValue={mapping.emoji}
+                          maxLength={32}
+                          placeholder="🔧"
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="sm:sr-only">Basic Discord role</span>
+                        <select
+                          className="input"
+                          name="reactionRoleId"
+                          defaultValue={mapping.roleId}
+                        >
+                          <option value="">No role — remove this row</option>
+                          {interestGuildRoles.map((role) => (
+                            <option key={role.id} value={role.id}>
+                              {role.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  ))}
+                </div>
                 {reactionRolePanel ? (
                   <p className="text-xs leading-5 text-[#aaa]">
                     Editing {reactionRolePanel.mappings.length} active mappings.
-                    Remove a line to remove that reaction, change the emoji or
-                    role name, then publish to update the existing Discord
-                    message.
+                    Select “No role” to remove a reaction, or use an empty row
+                    to add another basic role.
                   </p>
                 ) : null}
                 <button className="button justify-center sm:w-fit">

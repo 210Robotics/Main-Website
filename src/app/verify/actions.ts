@@ -8,6 +8,7 @@ import { auditEvents, members } from "@/db/schema";
 import { getCurrentMember, synchronizeCurrentMemberIdentity } from "@/lib/auth";
 import { reconcileMemberMembership } from "@/lib/membership-access-server";
 import { academicLevels } from "@/lib/membership-policy";
+import { syncDiscordDuesAccessForMember } from "@/lib/discord";
 import {
   canonicalMemberName,
   normalizedMemberNameParts,
@@ -90,6 +91,9 @@ export async function saveVerificationProfile(
     details: { academicLevel: parsed.data.academicLevel },
   });
   await reconcileMemberMembership(member.id);
+  await syncDiscordDuesAccessForMember(member.id).catch((error) => {
+    console.error("Discord profile synchronization failed", error);
+  });
   revalidatePath("/verify");
   revalidatePath("/portal");
   return { status: "success", message: "Profile saved. Your checklist is updated." };
@@ -97,6 +101,11 @@ export async function saveVerificationProfile(
 
 export async function refreshUniversityVerification() {
   const member = await synchronizeCurrentMemberIdentity();
-  if (member) await reconcileMemberMembership(member.id);
+  if (member) {
+    await reconcileMemberMembership(member.id);
+    await syncDiscordDuesAccessForMember(member.id).catch((error) => {
+      console.error("Discord verification synchronization failed", error);
+    });
+  }
   revalidatePath("/verify");
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { discordEvents } from "@/db/schema";
+import { discordEvents, discordReactionRolePanels } from "@/db/schema";
 import {
   publishDiscordReactionRolePanel,
   publishDiscordVerificationPanel,
@@ -54,19 +54,36 @@ export async function POST(request: Request) {
             status: "WARNING" as const,
             reason: error instanceof Error ? error.message : String(error),
           }));
-    const reactionRoles = await publishDiscordReactionRolePanel({
-      guildId: parsed.data.guildId,
-    })
-      .then((result) => ({
-        status: "READY" as const,
-        channelId: result.channelId,
-        messageId: result.messageId,
-        roleCount: result.mappings.length,
-      }))
-      .catch((error) => ({
-        status: "WARNING" as const,
-        reason: error instanceof Error ? error.message : String(error),
-      }));
+    const [existingReactionRolePanel] = await getDb()
+      .select()
+      .from(discordReactionRolePanels)
+      .where(
+        and(
+          eq(discordReactionRolePanels.guildId, parsed.data.guildId),
+          eq(discordReactionRolePanels.active, true),
+        ),
+      )
+      .limit(1);
+    const reactionRoles = existingReactionRolePanel
+      ? {
+          status: "EXISTS" as const,
+          channelId: existingReactionRolePanel.channelId,
+          messageId: existingReactionRolePanel.messageId,
+          roleCount: existingReactionRolePanel.mappings.length,
+        }
+      : await publishDiscordReactionRolePanel({
+          guildId: parsed.data.guildId,
+        })
+          .then((result) => ({
+            status: "READY" as const,
+            channelId: result.channelId,
+            messageId: result.messageId,
+            roleCount: result.mappings.length,
+          }))
+          .catch((error) => ({
+            status: "WARNING" as const,
+            reason: error instanceof Error ? error.message : String(error),
+          }));
     return NextResponse.json({ access, verificationPanel, reactionRoles });
   } catch (error) {
     console.error("Discord membership access sync failed", {

@@ -293,7 +293,11 @@ export async function upsertDiscordGuild({
 }
 
 const DISCORD_VIEW_CHANNEL_PERMISSION = "1024";
+const DISCORD_ADD_REACTIONS_PERMISSION = BigInt(1) << BigInt(6);
 const DISCORD_SEND_MESSAGES_PERMISSION = BigInt(1) << BigInt(11);
+const DISCORD_MANAGE_MESSAGES_PERMISSION = BigInt(1) << BigInt(13);
+const DISCORD_READ_MESSAGE_HISTORY_PERMISSION = BigInt(1) << BigInt(16);
+const DISCORD_MENTION_EVERYONE_PERMISSION = BigInt(1) << BigInt(17);
 const DISCORD_CREATE_PUBLIC_THREADS_PERMISSION = BigInt(1) << BigInt(35);
 const DISCORD_CREATE_PRIVATE_THREADS_PERMISSION = BigInt(1) << BigInt(36);
 const DISCORD_SEND_MESSAGES_IN_THREADS_PERMISSION = BigInt(1) << BigInt(38);
@@ -516,82 +520,277 @@ function memberIsDuesExempt({
   });
 }
 
-async function setDiscordDuesChannelAccess({
+async function setDiscordMembershipTierAccess({
   guildId,
+  roles,
+  unverifiedRoleId,
+  verifiedRoleId,
+  paidRoleId,
   unpaidRoleId,
   enabled,
-  publicChannelIds,
+  memberAccess,
 }: {
   guildId: string;
+  roles: DiscordRole[];
+  unverifiedRoleId: string;
+  verifiedRoleId: string;
+  paidRoleId: string;
   unpaidRoleId: string;
   enabled: boolean;
-  publicChannelIds: string[];
+  memberAccess: Array<{ discordUserId: string; verified: boolean }>;
 }) {
-  const channels = await getDb()
-    .select()
-    .from(discordChannels)
-    .where(eq(discordChannels.guildId, guildId));
-  const publicIds = new Set(publicChannelIds);
-  let restricted = 0;
-  for (const channel of channels) {
-    if (!DUES_CHANNEL_TYPES.has(channel.type) || channel.archived) continue;
-    const shouldRestrict = enabled && !publicIds.has(channel.id);
-    await discordFetch(
-      `/channels/${channel.id}/permissions/${unpaidRoleId}`,
-      {
-        method: "PUT",
-        headers: {
-          "X-Audit-Log-Reason": encodeURIComponent(
-            enabled
-              ? "210 Robotics membership dues access enabled"
-              : "210 Robotics membership dues access paused",
-          ),
-        },
-        body: JSON.stringify({
-          type: 0,
-          allow: "0",
-          deny: shouldRestrict ? DISCORD_VIEW_CHANNEL_PERMISSION : "0",
-        }),
-      },
+  const channels = await discordFetch<DiscordChannel[]>(
+    `/guilds/${guildId}/channels`,
+  );
+  const categoryIds = (pattern: RegExp) =>
+    new Set(
+      channels
+        .filter(
+          (channel) =>
+            channel.type === 4 &&
+            pattern.test(normalizedDiscordName(channel.name || "")),
+        )
+        .map((channel) => channel.id),
     );
-    if (shouldRestrict) restricted += 1;
+  const startCategories = categoryIds(/\b(start here|welcome|verification)\b/);
+  const announcementCategories = categoryIds(/\bannouncements?\b/);
+  const leadershipCategories = categoryIds(
+    /\b(leadership|officers?|executive|board)\b/,
+  );
+  const buildCategories = categoryIds(
+    /\b(build|mechanical|manufacturing|programming|software|code|systems|controls)\b/,
+  );
+  const isBuildChannel = (channel: DiscordChannel) => {
+    const name = normalizedDiscordName(channel.name || "");
+    return (
+      buildCategories.has(channel.id) ||
+      Boolean(channel.parent_id && buildCategories.has(channel.parent_id)) ||
+      /\b(build|mechanical|manufacturing|programming|software|code|systems|controls)\b/.test(
+        name,
+      )
+    );
+  };
+  const leadershipRoles = roles.filter(discordLeadershipRole);
+  const executiveRoles = roles.filter(discordExecutiveRole);
+  const teamLeadRoles = roles.filter(discordTeamLeadRole);
+  const interestRoles = roles.filter(isDiscordInterestRole);
+  const permissionTargets = channels.filter((channel) => {
+    if (channel.type === 4) return true;
+    return (
+      DUES_CHANNEL_TYPES.has(channel.type) &&
+      (!channel.parent_id || leadershipCategories.has(channel.parent_id))
+    );
+  });
+  const view = BigInt(DISCORD_VIEW_CHANNEL_PERMISSION);
+  const readOnlyAllow =
+    view |
+    DISCORD_READ_MESSAGE_HISTORY_PERMISSION |
+    DISCORD_ADD_REACTIONS_PERMISSION;
+  const basicMemberAllow = readOnlyAllow | DISCORD_SEND_MESSAGES_PERMISSION;
+  const limitedMemberDeny =
+    DISCORD_MANAGE_MESSAGES_PERMISSION | DISCORD_MENTION_EVERYONE_PERMISSION;
+  const readOnlyDeny =
+    limitedMemberDeny |
+    DISCORD_SEND_MESSAGES_PERMISSION |
+    DISCORD_CREATE_PUBLIC_THREADS_PERMISSION |
+    DISCORD_CREATE_PRIVATE_THREADS_PERMISSION |
+    DISCORD_SEND_MESSAGES_IN_THREADS_PERMISSION;
+  const tierPermissionBits = basicMemberAllow | readOnlyDeny;
+  let restricted = 0;
+  for (const channel of permissionTargets) {
+    const name = normalizedDiscordName(channel.name || "");
+    const isStart =
+      startCategories.has(channel.id) ||
+      /\b(start here|welcome|verification)\b/.test(name);
+    const isAnnouncement =
+      announcementCategories.has(channel.id) ||
+      /\bannouncements?\b/.test(name);
+    const isLeadership =
+      leadershipCategories.has(channel.id) ||
+      Boolean(channel.parent_id && leadershipCategories.has(channel.parent_id)) ||
+      /\b(leadership|officers?|executive|board)\b/.test(name);
+    const isBuild = isBuildChannel(channel);
+    const isExecutiveLeadershipChannel =
+      isLeadership &&
+      /\b(executive|officers?|president|vice|treasurer|secretary|board)\b/.test(
+        name,
+      );
+    const isLeadershipCategory = leadershipCategories.has(channel.id);
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: guildId,
+      ...(enabled && !isStart
+        ? { denyBits: view }
+        : enabled
+          ? { allowBits: readOnlyAllow, denyBits: readOnlyDeny }
+          : { clearBits: tierPermissionBits }),
+      reason: "210 Robotics membership tier baseline",
+    });
+    // Interest roles describe a member's interests; they never grant access.
+    // Clearing their View Channel overwrite prevents a reaction role from
+    // bypassing verification or dues gates.
+    for (const role of interestRoles) {
+      await updateDiscordPermissionOverwrite({
+        channel,
+        targetId: role.id,
+        clearBits: tierPermissionBits,
+        reason: "210 Robotics interest roles do not grant channel access",
+      });
+    }
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: unverifiedRoleId,
+      ...(enabled && !isStart
+        ? { denyBits: view, clearBits: tierPermissionBits }
+        : enabled
+          ? { allowBits: readOnlyAllow, denyBits: readOnlyDeny }
+          : { clearBits: tierPermissionBits }),
+      reason: "210 Robotics identity verification access",
+    });
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: verifiedRoleId,
+      ...(enabled && (isLeadership || isBuild)
+        ? { denyBits: view, clearBits: tierPermissionBits }
+        : enabled && (isStart || isAnnouncement)
+          ? { allowBits: readOnlyAllow, denyBits: readOnlyDeny }
+          : enabled
+            ? { allowBits: basicMemberAllow, denyBits: limitedMemberDeny }
+            : { clearBits: tierPermissionBits }),
+      reason: "210 Robotics verified member access",
+    });
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: unpaidRoleId,
+      ...(enabled && isBuild
+        ? { denyBits: view, clearBits: tierPermissionBits }
+        : { clearBits: tierPermissionBits }),
+      reason: "210 Robotics dues-gated engineering access",
+    });
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: paidRoleId,
+      ...(enabled && isBuild
+        ? { allowBits: basicMemberAllow, denyBits: limitedMemberDeny }
+        : enabled && isLeadership
+          ? { denyBits: view, clearBits: tierPermissionBits }
+          : { clearBits: tierPermissionBits }),
+      reason: "210 Robotics paid engineering access",
+    });
+    if (isLeadership) {
+      for (const role of leadershipRoles) {
+        const mayView =
+          !isLeadershipCategory &&
+          (!isExecutiveLeadershipChannel ||
+            executiveRoles.some(({ id }) => id === role.id));
+        await updateDiscordPermissionOverwrite({
+          channel,
+          targetId: role.id,
+          ...(mayView
+            ? teamLeadRoles.some(({ id }) => id === role.id)
+              ? { allowBits: basicMemberAllow, denyBits: limitedMemberDeny }
+              : { allowBits: view }
+            : { clearBits: view }),
+          reason: "210 Robotics scoped leadership access",
+        });
+      }
+    } else if (isBuild) {
+      for (const role of leadershipRoles) {
+        await updateDiscordPermissionOverwrite({
+          channel,
+          targetId: role.id,
+          allowBits: view,
+          reason: "210 Robotics leadership engineering access",
+        });
+      }
+    }
+    if (enabled && !isStart) restricted += 1;
+    for (const member of memberAccess) {
+      await updateDiscordPermissionOverwrite({
+        channel,
+        targetId: member.discordUserId,
+        targetType: 1,
+        ...(enabled && !member.verified && !isStart
+          ? { denyBits: view, clearBits: tierPermissionBits }
+          : enabled && !member.verified
+            ? { allowBits: readOnlyAllow, denyBits: readOnlyDeny }
+            : { clearBits: tierPermissionBits }),
+        reason: "210 Robotics individual verification access",
+      });
+    }
+  }
+  // Remove legacy dues denies from child channels; their category now owns access.
+  for (const channel of channels) {
+    if (!channel.parent_id || !DUES_CHANNEL_TYPES.has(channel.type)) continue;
+    if (isBuildChannel(channel)) continue;
+    const existing = channel.permission_overwrites?.find(
+      (overwrite) => overwrite.id === unpaidRoleId && overwrite.type === 0,
+    );
+    if ((BigInt(existing?.deny || "0") & view) === BigInt(0)) continue;
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: unpaidRoleId,
+      clearBits: view,
+      reason: "210 Robotics tiered access migration",
+    });
   }
   return { restricted, inspected: channels.length };
 }
 
 function discordLeadershipRole(role: DiscordRole) {
+  return discordExecutiveRole(role) || discordTeamLeadRole(role);
+}
+
+function discordExecutiveRole(role: DiscordRole) {
   const permissions = BigInt(role.permissions || "0");
   return (
     (permissions & BigInt(DISCORD_ADMINISTRATOR_PERMISSION)) !== BigInt(0) ||
-    /\b(admins?|administrators?|officers?|directors?|leads?|captains?|executive|board)\b/i.test(
+    /\b(admins?|administrators?|officers?|captains?|executive|board|president|vice president|vp|treasurer|secretary)\b/i.test(
       role.name,
     )
   );
 }
 
+function discordTeamLeadRole(role: DiscordRole) {
+  return /\b(directors?|leads?)\b/i.test(role.name);
+}
+
 async function updateDiscordPermissionOverwrite({
   channel,
   targetId,
+  targetType = 0,
   allowBits = BigInt(0),
   denyBits = BigInt(0),
+  clearBits = BigInt(0),
   reason,
 }: {
   channel: DiscordChannel;
   targetId: string;
+  targetType?: 0 | 1;
   allowBits?: bigint;
   denyBits?: bigint;
+  clearBits?: bigint;
   reason: string;
 }) {
   const existing = channel.permission_overwrites?.find(
-    (overwrite) => overwrite.id === targetId && overwrite.type === 0,
+    (overwrite) =>
+      overwrite.id === targetId && overwrite.type === targetType,
   );
-  const allow = (BigInt(existing?.allow || "0") | allowBits) & ~denyBits;
-  const deny = (BigInt(existing?.deny || "0") | denyBits) & ~allowBits;
+  const existingAllow = BigInt(existing?.allow || "0");
+  const existingDeny = BigInt(existing?.deny || "0");
+  const allow = ((existingAllow & ~clearBits) | allowBits) & ~denyBits;
+  const deny = ((existingDeny & ~clearBits) | denyBits) & ~allowBits;
+  if (allow === existingAllow && deny === existingDeny) return false;
   await discordFetch(`/channels/${channel.id}/permissions/${targetId}`, {
     method: "PUT",
     headers: { "X-Audit-Log-Reason": encodeURIComponent(reason) },
-    body: JSON.stringify({ type: 0, allow: String(allow), deny: String(deny) }),
+    body: JSON.stringify({
+      type: targetType,
+      allow: String(allow),
+      deny: String(deny),
+    }),
   });
+  return true;
 }
 
 async function setDiscordSensitiveAreaAccess({
@@ -643,22 +842,6 @@ async function setDiscordSensitiveAreaAccess({
     );
   });
   const leadershipRoles = roles.filter(discordLeadershipRole);
-  for (const channel of leadershipChannels) {
-    await updateDiscordPermissionOverwrite({
-      channel,
-      targetId: guildId,
-      denyBits: BigInt(DISCORD_VIEW_CHANNEL_PERMISSION),
-      reason: "210 Robotics leadership category privacy",
-    });
-    for (const role of leadershipRoles) {
-      await updateDiscordPermissionOverwrite({
-        channel,
-        targetId: role.id,
-        allowBits: BigInt(DISCORD_VIEW_CHANNEL_PERMISSION),
-        reason: "210 Robotics leadership category access",
-      });
-    }
-  }
   for (const channel of announcementChannels) {
     await updateDiscordPermissionOverwrite({
       channel,
@@ -714,6 +897,7 @@ export async function syncDiscordDuesAccess({
       nicknameSyncEnabled: members.nicknameSyncEnabled,
       universityEmailVerifiedAt: members.universityEmailVerifiedAt,
       universityEmailOverrideAt: members.universityEmailOverrideAt,
+      profileCompletedAt: members.profileCompletedAt,
       gracePeriodEndsAt: members.gracePeriodEndsAt,
       duesStatus: membershipDues.status,
       amountDueCents: membershipDues.amountDueCents,
@@ -747,6 +931,10 @@ export async function syncDiscordDuesAccess({
   let unpaid = 0;
   let exempt = 0;
   let changed = 0;
+  const memberPermissionStates: Array<{
+    discordUserId: string;
+    verified: boolean;
+  }> = [];
   for (const row of memberRows) {
     const currentRoles = new Set(row.discord.roles);
     const isExempt = memberIsDuesExempt({
@@ -756,7 +944,7 @@ export async function syncDiscordDuesAccess({
       roles: roleState.roles,
     });
     const isPaid =
-      row.memberStatus === "ACTIVE" &&
+      row.memberStatus !== "SUSPENDED" &&
       (row.duesStatus === "PAID" ||
         row.duesStatus === "WAIVED" ||
         row.duesStatus === "WAIVED_FUNDRAISING") &&
@@ -770,17 +958,20 @@ export async function syncDiscordDuesAccess({
     const universityVerified = Boolean(
       row.universityEmailVerifiedAt || row.universityEmailOverrideAt,
     );
-    const profileEligible =
-      row.memberStatus === "ACTIVE" &&
-      ["ACTIVE_MEMBER", "WAIVED_MEMBER", "MENTOR"].includes(
-        row.accessState || "",
+    const identityEligible =
+      row.memberStatus !== "SUSPENDED" &&
+      Boolean(row.discord.linkedMemberId) &&
+      universityVerified &&
+      Boolean(
+        row.profileCompletedAt && row.firstName?.trim() && row.lastName?.trim(),
       );
+    memberPermissionStates.push({
+      discordUserId: row.discord.discordUserId,
+      verified: identityEligible || isExempt,
+    });
     const hasFullAccess =
       isExempt ||
-      (Boolean(row.discord.linkedMemberId) &&
-        universityVerified &&
-        profileEligible &&
-        (isPaid || gracePeriodActive));
+      (identityEligible && (isPaid || gracePeriodActive));
     const desiredRoleId =
       !enabled || isExempt
         ? null
@@ -792,16 +983,14 @@ export async function syncDiscordDuesAccess({
     const semanticRoleIds = new Set<string>();
     if (row.memberStatus === "SUSPENDED") {
       semanticRoleIds.add(roleState.suspendedRole.id);
-    } else if (!row.discord.linkedMemberId || !universityVerified) {
-      semanticRoleIds.add(roleState.unverifiedRole.id);
     } else {
-      semanticRoleIds.add(roleState.utsaVerifiedRole.id);
-      if (
-        row.accessState === "ACTIVE_MEMBER" ||
-        row.accessState === "WAIVED_MEMBER" ||
-        isExempt
-      ) {
+      if (universityVerified) {
+        semanticRoleIds.add(roleState.utsaVerifiedRole.id);
+      }
+      if (identityEligible || isExempt) {
         semanticRoleIds.add(roleState.verifiedMemberRole.id);
+      } else {
+        semanticRoleIds.add(roleState.unverifiedRole.id);
       }
     }
     const managedRoleIds = [
@@ -925,16 +1114,15 @@ export async function syncDiscordDuesAccess({
     leadershipRoles: 0,
   };
   if (configureChannels) {
-    channelResult = await setDiscordDuesChannelAccess({
+    channelResult = await setDiscordMembershipTierAccess({
       guildId,
+      roles: roleState.roles,
+      unverifiedRoleId: roleState.unverifiedRole.id,
+      verifiedRoleId: roleState.verifiedMemberRole.id,
+      paidRoleId: roleState.paidRole.id,
       unpaidRoleId: roleState.unpaidRole.id,
       enabled,
-      publicChannelIds: [
-        ...new Set([
-          ...(guild.duesPublicChannelIds || []),
-          ...(guild.verificationPublicChannelIds || []),
-        ]),
-      ],
+      memberAccess: memberPermissionStates,
     });
     sensitiveAreaResult = await setDiscordSensitiveAreaAccess({
       guildId,

@@ -62,6 +62,7 @@ import {
   allowedMeetingRecordingTypes,
   transcribeAndArchiveMeeting,
 } from "@/lib/meeting-transcription";
+import { isDiscordInterestRole } from "@/lib/discord-role-selection";
 
 export type DiscordConnectState = {
   status: "idle" | "success" | "warning" | "error";
@@ -428,12 +429,26 @@ export async function postDiscordVerificationPanel(formData: FormData) {
 export async function postDiscordReactionRolePanel(formData: FormData) {
   const actor = await requirePermission("integrations.manage");
   const guildId = required(formData, "guildId");
-  const mappingSpec = String(formData.get("mappingSpec") || "")
-    .trim()
-    .slice(0, 1_800);
+  const emojis = formData.getAll("reactionEmoji").map(String);
+  const roleIds = formData.getAll("reactionRoleId").map(String);
+  const safeRoles = (await listDiscordGuildRoles(guildId)).filter(
+    isDiscordInterestRole,
+  );
+  const safeRoleById = new Map(safeRoles.map((role) => [role.id, role]));
+  const mappings = emojis.flatMap((emojiValue, index) => {
+    const role = safeRoleById.get(roleIds[index] || "");
+    if (!role) return [];
+    return [
+      `${normalizeDiscordReactionEmoji(emojiValue)}=${role.name}`,
+    ];
+  });
+  if (!mappings.length) {
+    throw new Error("Choose at least one basic team-interest role.");
+  }
+  const mappingSpec = mappings.join(", ").slice(0, 1_800);
   const posted = await publishDiscordReactionRolePanel({
     guildId,
-    mappingSpec: mappingSpec || undefined,
+    mappingSpec,
     createdByMemberId: actor.id,
   });
   await getDb().insert(auditEvents).values({

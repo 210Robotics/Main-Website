@@ -17,7 +17,7 @@ function selectable(roles: DiscordRoleOption[]) {
 }
 
 const forbiddenInterestRoleTerms =
-  /\b(admin|administrator|officer|director|lead|captain|president|vice president|treasurer|secretary|mentor|verified|unverified|member|agreed|paid|dues|suspended|alumni|guest|bot|moderator|owner)\b/;
+  /\b(admin|administrator|officer|director|lead|captain|president|vice president|vp|treasurer|secretary|chair|chairman|chairwoman|mentor|verified|unverified|member|agreed|paid|dues|suspended|alumni|guest|bot|moderator|owner)\b/;
 
 const interestRoleDefinitions = [
   { test: /\bmechanical\b/, emoji: "🔧" },

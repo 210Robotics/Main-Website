@@ -68,6 +68,8 @@ describe("Discord interest role safety", () => {
       "Verified Member",
       "VEX U Member",
       "Admin",
+      "Mechanical VP",
+      "Programming Chair",
     ]) {
       expect(
         isDiscordInterestRole({ id: name, name, position: 2, managed: false }),
