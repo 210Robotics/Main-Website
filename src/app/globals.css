@@ -730,11 +730,11 @@ button {
   border-color: #454545;
   background: #0e0e0e;
 }
-.admin-workspace select.input {
+select.input {
   color-scheme: dark;
 }
-.admin-workspace select.input option,
-.admin-workspace select.input optgroup {
+select.input option,
+select.input optgroup {
   background: #101010;
   color: #f5f5f5;
 }
