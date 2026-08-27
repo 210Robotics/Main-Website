@@ -27,6 +27,8 @@ import {
   Client,
   GatewayIntentBits,
   Partials,
+  type MessageReaction,
+  type PartialMessageReaction,
   type VoiceBasedChannel,
 } from "discord.js";
 import ffmpegPath from "ffmpeg-static";
@@ -125,11 +127,17 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.DirectMessages,
   ],
-  partials: [Partials.Channel],
+  partials: [
+    Partials.Channel,
+    Partials.Message,
+    Partials.Reaction,
+    Partials.User,
+  ],
 });
 const sessions = new Map<string, RecordingSession>();
 const speechQueues = new Map<string, Promise<void>>();
@@ -1068,6 +1076,69 @@ client.on("guildMemberAdd", (member) => {
   });
 });
 
+async function forwardReactionRoleEvent({
+  reaction,
+  discordUserId,
+  action,
+}: {
+  reaction: MessageReaction | PartialMessageReaction;
+  discordUserId: string;
+  action: "ADD" | "REMOVE";
+}) {
+  if (reaction.partial) await reaction.fetch();
+  if (reaction.message.partial) await reaction.message.fetch();
+  const guildId = reaction.message.guildId;
+  if (!guildId) return;
+  const emoji = reaction.emoji.id
+    ? `${reaction.emoji.name || "emoji"}:${reaction.emoji.id}`
+    : reaction.emoji.name || "";
+  if (!emoji) return;
+  await postWebsiteWorkflow("/api/discord/reaction-role-events", {
+    guildId,
+    channelId: reaction.message.channelId,
+    messageId: reaction.message.id,
+    discordUserId,
+    emoji,
+    action,
+  });
+}
+
+client.on("messageReactionAdd", (reaction, user) => {
+  if (user.bot) return;
+  void forwardReactionRoleEvent({
+    reaction,
+    discordUserId: user.id,
+    action: "ADD",
+  }).catch((error) => {
+    console.error(
+      JSON.stringify({
+        event: "discord.reaction_role_add_failed",
+        messageId: reaction.message.id,
+        discordUserId: user.id,
+        error: errorMessage(error),
+      }),
+    );
+  });
+});
+
+client.on("messageReactionRemove", (reaction, user) => {
+  if (user.bot) return;
+  void forwardReactionRoleEvent({
+    reaction,
+    discordUserId: user.id,
+    action: "REMOVE",
+  }).catch((error) => {
+    console.error(
+      JSON.stringify({
+        event: "discord.reaction_role_remove_failed",
+        messageId: reaction.message.id,
+        discordUserId: user.id,
+        error: errorMessage(error),
+      }),
+    );
+  });
+});
+
 client.on("ready", () => {
   console.info(
     JSON.stringify({
@@ -1076,6 +1147,19 @@ client.on("ready", () => {
       guilds: client.guilds.cache.size,
     }),
   );
+  for (const guild of client.guilds.cache.values()) {
+    void postWebsiteWorkflow("/api/discord/access-sync", {
+      guildId: guild.id,
+    }).catch((error) => {
+      console.error(
+        JSON.stringify({
+          event: "discord.membership_access_startup_sync_failed",
+          guildId: guild.id,
+          error: errorMessage(error),
+        }),
+      );
+    });
+  }
 });
 
 client.on("shardDisconnect", (event, shardId) => {
@@ -1178,6 +1262,10 @@ client.on("messageCreate", (message) => {
             "name" in message.channel && message.channel.name
               ? message.channel.name
               : "unknown-channel",
+          parentCategoryName:
+            "parent" in message.channel && message.channel.parent
+              ? message.channel.parent.name
+              : null,
           channelType: message.channel.type,
           messageId: message.id,
           content: message.content || "",
@@ -1219,7 +1307,7 @@ client.on("messageCreate", (message) => {
       await message.delete();
       const warning = result.moderationAction === "REMOVE_SECRET"
         ? "Your message was removed because it appeared to contain a credential or secret. Rotate that credential immediately and contact an officer if you need help. The detected value was redacted from the portal log."
-        : "Your message was removed because an internal engineering file was posted in a public/guest channel. Please use an authorized internal engineering channel.";
+        : "Your message was removed because an internal engineering file was posted in a General or Announcements area. Please use an authorized internal engineering channel; engineering uploads remain allowed there.";
       await message.author.send(warning).catch(() => undefined);
       return;
     }

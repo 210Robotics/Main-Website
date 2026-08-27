@@ -18,14 +18,6 @@ export type VerificationProfileState = {
 const profileSchema = z.object({
   firstName: z.string().trim().min(1, "Enter your first name.").max(60),
   lastName: z.string().trim().min(1, "Enter your last name.").max(60),
-  displayName: z
-    .string()
-    .trim()
-    .min(3, "Use a recognizable first and last name.")
-    .max(100)
-    .refine((value) => value.includes(" "), {
-      message: "Use a recognizable first and last name.",
-    }),
   academicLevel: z.enum(academicLevels),
   major: z.string().trim().max(120),
   expectedGraduationYear: z
@@ -46,7 +38,6 @@ export async function saveVerificationProfile(
   const parsed = profileSchema.safeParse({
     firstName: formData.get("firstName"),
     lastName: formData.get("lastName"),
-    displayName: formData.get("displayName"),
     academicLevel: formData.get("academicLevel"),
     major: formData.get("major"),
     expectedGraduationYear: formData.get("expectedGraduationYear") || "",
@@ -64,12 +55,13 @@ export async function saveVerificationProfile(
     };
   }
   const now = new Date();
+  const canonicalName = `${parsed.data.firstName} ${parsed.data.lastName}`;
   await getDb()
     .update(members)
     .set({
       firstName: parsed.data.firstName,
       lastName: parsed.data.lastName,
-      displayName: parsed.data.displayName,
+      displayName: canonicalName,
       academicLevel: parsed.data.academicLevel,
       major: parsed.data.major,
       expectedGraduationYear:
@@ -100,4 +92,3 @@ export async function refreshUniversityVerification() {
   if (member) await reconcileMemberMembership(member.id);
   revalidatePath("/verify");
 }
-

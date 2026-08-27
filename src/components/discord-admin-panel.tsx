@@ -19,11 +19,13 @@ import {
   discordGuilds,
   discordMessages,
   discordVerificationApplications,
+  membershipDues,
   members,
 } from "@/db/schema";
 import {
   registerDiscordCommandsAction,
   postDiscordRecordingPolicy,
+  postDiscordReactionRolePanel,
   postDiscordVerificationPanel,
   processDiscordOnboardingNow,
   retryDiscordOnboardingRoles,
@@ -35,6 +37,7 @@ import {
   sendCalendarRemindersNow,
   sendDiscordBroadcastReminder,
   sendDiscordReminder,
+  sendDiscordMembershipReminderGroup,
   sendMonthlyCalendarDigestNow,
   syncDiscordNow,
   syncDiscordMessagesNow,
@@ -54,6 +57,7 @@ import { DiscordOrganizationDebrief } from "@/components/discord-organization-de
 import { DiscordSectionMenu } from "@/components/discord-section-menu";
 import { DiscordVoiceSpeaker } from "@/components/discord-voice-speaker";
 import { requirePermission } from "@/lib/auth";
+import { currentMembershipPeriod } from "@/lib/membership-dues";
 import {
   checkDiscordGuildAccess,
   discordConfiguration,
@@ -89,6 +93,7 @@ export async function DiscordAdminPanel({
     .orderBy(desc(discordGuilds.updatedAt))
     .limit(1);
   const safeSearch = searchQuery.trim().slice(0, 100);
+  const membershipPeriod = currentMembershipPeriod();
   const messageFilter = guild
     ? and(
         eq(discordMessages.guildId, guild.id),
@@ -124,10 +129,26 @@ export async function DiscordAdminPanel({
             discord: discordGuildMembers,
             memberName: members.displayName,
             memberEmail: members.email,
+            memberFirstName: members.firstName,
+            memberLastName: members.lastName,
+            memberAccessState: members.accessState,
+            memberProfileCompletedAt: members.profileCompletedAt,
+            universityEmailVerifiedAt: members.universityEmailVerifiedAt,
+            universityEmailOverrideAt: members.universityEmailOverrideAt,
+            duesStatus: membershipDues.status,
+            duesAmountDueCents: membershipDues.amountDueCents,
+            duesAmountPaidCents: membershipDues.amountPaidCents,
             recentlyReminded: sql<boolean>`${discordGuildMembers.registrationReminderSentAt} > now() - interval '14 days'`,
           })
           .from(discordGuildMembers)
           .leftJoin(members, eq(members.id, discordGuildMembers.linkedMemberId))
+          .leftJoin(
+            membershipDues,
+            and(
+              eq(membershipDues.memberId, discordGuildMembers.linkedMemberId),
+              eq(membershipDues.period, membershipPeriod),
+            ),
+          )
           .where(
             and(
               eq(discordGuildMembers.guildId, guild.id),
@@ -154,6 +175,12 @@ export async function DiscordAdminPanel({
         displayName: members.displayName,
         email: members.email,
         accessRole: members.accessRole,
+        firstName: members.firstName,
+        lastName: members.lastName,
+        accessState: members.accessState,
+        profileCompletedAt: members.profileCompletedAt,
+        universityEmailVerifiedAt: members.universityEmailVerifiedAt,
+        universityEmailOverrideAt: members.universityEmailOverrideAt,
       })
       .from(members)
       .where(eq(members.status, "ACTIVE"))
@@ -269,6 +296,41 @@ export async function DiscordAdminPanel({
   const websiteOnlyMembers = websiteMembers.filter(
     (member) => !linkedWebsiteMemberIds.has(member.id),
   );
+  const verifiedWebsiteMembers = websiteMembers.filter(
+    (member) =>
+      Boolean(
+        member.profileCompletedAt &&
+          member.firstName.trim() &&
+          member.lastName.trim() &&
+          (member.universityEmailVerifiedAt || member.universityEmailOverrideAt),
+      ),
+  );
+  const linkedMemberHealth = linked.map((row) => {
+    const canonicalName = [row.memberFirstName, row.memberLastName]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(" ");
+    const normalized = (value: string) =>
+      value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const verified = Boolean(
+      row.universityEmailVerifiedAt || row.universityEmailOverrideAt,
+    );
+    const duesSatisfied =
+      ["WAIVED", "WAIVED_FUNDRAISING"].includes(row.duesStatus || "") ||
+      (row.duesStatus === "PAID" &&
+        (row.duesAmountDueCents || 0) > 0 &&
+        (row.duesAmountPaidCents || 0) >= (row.duesAmountDueCents || 0));
+    return {
+      ...row,
+      canonicalName,
+      verified,
+      duesSatisfied,
+      nicknameMatches: Boolean(
+        canonicalName &&
+          normalized(row.discord.displayName) === normalized(canonicalName),
+      ),
+    };
+  });
   const directMessageConversationMap = new Map<
     string,
     {
@@ -346,13 +408,14 @@ export async function DiscordAdminPanel({
   const onboardingRoleIssues = discordMembers.filter(
     ({ discord }) => Boolean(discord.onboardingRoleError),
   );
+  const inferredPublicChannelIds = new Set(
+    inferDiscordDuesPublicChannelIds(channelRows),
+  );
   const duesChannelOptions = channelRows.filter(
     (channel) => [0, 2, 5, 13, 15].includes(channel.type) && !channel.archived,
-  );
+  ).filter((channel) => inferredPublicChannelIds.has(channel.id));
   const selectedDuesPublicChannelIds = new Set(
-    guild?.duesPublicChannelIds.length
-      ? guild.duesPublicChannelIds
-      : inferDiscordDuesPublicChannelIds(duesChannelOptions),
+    inferredPublicChannelIds,
   );
 
   return (
@@ -660,23 +723,23 @@ export async function DiscordAdminPanel({
               </p>
               <h3 className="mt-3 text-xl font-bold">Paid member access</h3>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
-                In transition mode, dues do not change channel access. When
-                enforcement is enabled, the bot creates Membership Paid and
-                Membership Not Paid roles, keeps the selected public channels
-                visible, and hides other channels from unpaid members.
+                In transition mode, verification and dues do not change channel
+                access. When enforcement is enabled, the bot keeps the selected
+                General and Announcements areas visible and hides other
+                channels from unverified or unpaid members.
                 Administrators, officers, directors, leads, and bots are always
                 exempt.
               </p>
             </div>
             <span
               className={
-                guild.duesEnforcementEnabled
+                guild.duesEnforcementEnabled || guild.verificationEnforcementEnabled
                   ? "tag border-emerald-700 text-emerald-300"
                   : "tag border-blue-700 text-blue-300"
               }
             >
-              {guild.duesEnforcementEnabled
-                ? "Payment enforcement on"
+              {guild.duesEnforcementEnabled || guild.verificationEnforcementEnabled
+                ? "Membership enforcement on"
                 : "Transition mode"}
             </span>
           </div>
@@ -692,15 +755,18 @@ export async function DiscordAdminPanel({
                 className="mt-1.5"
                 type="checkbox"
                 name="duesEnforcementEnabled"
-                defaultChecked={guild.duesEnforcementEnabled}
+                defaultChecked={
+                  guild.duesEnforcementEnabled ||
+                  guild.verificationEnforcementEnabled
+                }
               />
               <span>
                 <strong className="block text-white">
-                  Require paid or waived dues for private Discord channels
+                  Require verified identity and paid/waived dues for private channels
                 </strong>
-                Leave this off during a transition period. Turning it off
-                removes the payment restriction from members without changing
-                officer or server permissions.
+                When enabled, unverified or unpaid members retain only the
+                selected General and Announcements areas. Officers,
+                administrators, leads, and bot roles remain exempt.
               </span>
             </label>
             <fieldset>
@@ -869,6 +935,62 @@ export async function DiscordAdminPanel({
               Check due unlocks now
             </button>
           </ActionForm>
+          <div className="mt-6 grid gap-5 border-t border-[#303030] pt-6 xl:grid-cols-2">
+            <div className="border border-[#343434] bg-black/25 p-4 sm:p-5">
+              <p className="text-sm font-bold text-white">
+                Private membership reminders
+              </p>
+              <p className="mt-2 text-xs leading-5 text-[#888]">
+                The matching slash commands are <code>/verification</code> for
+                every member and <code>/member-reminders</code> for a selected
+                incomplete requirement. DMs contain each person&apos;s private
+                checklist and secure portal link.
+              </p>
+              <ActionForm
+                action={sendDiscordMembershipReminderGroup}
+                successMessage="Private membership reminder batch finished."
+                className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <input type="hidden" name="guildId" value={guild.id} />
+                <select className="input" name="group" defaultValue="ATTENTION">
+                  <option value="ATTENTION">Any incomplete requirement</option>
+                  <option value="DUES">Dues not paid or waived</option>
+                  <option value="UNLINKED">Portal account not linked</option>
+                  <option value="UNVERIFIED">UTSA identity not verified</option>
+                  <option value="NICKNAME">Nickname is not First Last</option>
+                  <option value="EVERYONE">Every server member</option>
+                </select>
+                <button className="button justify-center">Send private DMs</button>
+              </ActionForm>
+            </div>
+            <div className="border border-[#343434] bg-black/25 p-4 sm:p-5">
+              <p className="text-sm font-bold text-white">
+                Safe team-interest reaction roles
+              </p>
+              <p className="mt-2 text-xs leading-5 text-[#888]">
+                Publish or update the message in #roles. Leave the list blank
+                to detect safe interests automatically, or enter mappings such
+                as <code>🔧=Mechanical, ⚡=Electrical</code>. Leadership,
+                permission, payment, and verification roles are always blocked.
+              </p>
+              <ActionForm
+                action={postDiscordReactionRolePanel}
+                successMessage="The #roles reaction-role panel was updated."
+                className="mt-4 grid gap-3"
+              >
+                <input type="hidden" name="guildId" value={guild.id} />
+                <textarea
+                  className="input min-h-24"
+                  name="mappingSpec"
+                  maxLength={1_800}
+                  placeholder="🔧=Mechanical, ⚡=Electrical, 💻=Programming"
+                />
+                <button className="button justify-center sm:w-fit">
+                  Publish / update reaction roles
+                </button>
+              </ActionForm>
+            </div>
+          </div>
           {!!onboardingRoleIssues.length && (
             <div className="mt-6 border-t border-[#303030] pt-5">
               <h4 className="text-sm font-bold text-white">
@@ -1556,10 +1678,11 @@ export async function DiscordAdminPanel({
             )}
           </div>
         </div>
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Metric value={linked.length} label="Linked accounts" />
           <Metric value={unlinked.length} label="Discord only" />
           <Metric value={websiteOnlyMembers.length} label="Portal only" />
+          <Metric value={verifiedWebsiteMembers.length} label="Verified portal members" />
         </div>
 
         <details className="mt-5 border border-[#343434] bg-[#0d0d0d]">
@@ -1706,7 +1829,16 @@ export async function DiscordAdminPanel({
             Linked Discord + portal accounts ({linked.length})
           </summary>
           <div className="grid gap-3 border-t border-[#303030] p-4 lg:grid-cols-2 sm:p-5">
-            {linked.map(({ discord, memberName, memberEmail }) => (
+            {linkedMemberHealth.map(({
+              discord,
+              memberName,
+              memberEmail,
+              memberAccessState,
+              canonicalName,
+              verified,
+              duesSatisfied,
+              nicknameMatches,
+            }) => (
               <article
                 className="min-w-0 border border-[#343434] bg-[#101010] p-4"
                 key={discord.id}
@@ -1724,8 +1856,53 @@ export async function DiscordAdminPanel({
                     Linked
                   </span>
                 </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <MemberCheck label="Portal" complete />
+                  <MemberCheck label="Identity" complete={verified} />
+                  <MemberCheck label="Dues" complete={duesSatisfied} />
+                  <MemberCheck label="Nickname" complete={nicknameMatches} />
+                </div>
+                <p className="mt-3 text-xs leading-5 text-[#777]">
+                  Portal name: {canonicalName || "Incomplete"} · Discord name:{" "}
+                  {discord.displayName} · Access: {memberAccessState || "PENDING"}
+                </p>
               </article>
             ))}
+          </div>
+        </details>
+
+        <details className="mt-3 border border-[#343434] bg-[#0d0d0d]">
+          <summary className="cursor-pointer p-4 text-sm font-bold sm:p-5">
+            Verified website members ({verifiedWebsiteMembers.length})
+          </summary>
+          <div className="grid gap-3 border-t border-[#303030] p-4 lg:grid-cols-2 sm:p-5">
+            {verifiedWebsiteMembers.map((member) => (
+              <article
+                className="min-w-0 border border-[#343434] bg-[#101010] p-4"
+                key={member.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <strong className="block truncate">{member.displayName}</strong>
+                    <span className="block truncate text-xs text-[#777]">
+                      {member.email} · {member.accessRole}
+                    </span>
+                  </div>
+                  <span className="tag border-emerald-800 text-emerald-300">
+                    Identity verified
+                  </span>
+                </div>
+                <p className="mt-3 text-xs text-[#777]">
+                  Membership state: {member.accessState}
+                </p>
+              </article>
+            ))}
+            {!verifiedWebsiteMembers.length && (
+              <p className="text-sm text-[#777]">
+                No active portal member has completed both verified identity
+                and the required First Last profile yet.
+              </p>
+            )}
           </div>
         </details>
 
@@ -1859,6 +2036,26 @@ function Metric({ value, label }: { value: number; label: string }) {
         {label}
       </p>
     </div>
+  );
+}
+
+function MemberCheck({
+  label,
+  complete,
+}: {
+  label: string;
+  complete: boolean;
+}) {
+  return (
+    <span
+      className={
+        complete
+          ? "border border-emerald-900/80 bg-emerald-950/20 px-2 py-1.5 text-emerald-300"
+          : "border border-amber-900/80 bg-amber-950/20 px-2 py-1.5 text-amber-300"
+      }
+    >
+      {complete ? "✓" : "○"} {label}
+    </span>
   );
 }
 

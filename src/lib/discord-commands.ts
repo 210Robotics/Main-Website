@@ -132,4 +132,44 @@ export const discordApplicationCommands = [
     description: "Post the member verification application in the rules channel",
     default_member_permissions: "8",
   },
+  {
+    name: "verification",
+    description: "DM every member the secure verification checklist",
+    default_member_permissions: "8",
+  },
+  {
+    name: "member-reminders",
+    description: "DM members who need a specific membership action",
+    default_member_permissions: "8",
+    options: [
+      {
+        type: 3,
+        name: "group",
+        description: "Which members should receive the private checklist",
+        required: true,
+        choices: [
+          { name: "Any incomplete requirement", value: "ATTENTION" },
+          { name: "Dues not paid or waived", value: "DUES" },
+          { name: "Portal account not linked", value: "UNLINKED" },
+          { name: "UTSA identity not verified", value: "UNVERIFIED" },
+          { name: "Nickname is not First Last", value: "NICKNAME" },
+          { name: "Every server member", value: "EVERYONE" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "roles",
+    description: "Publish or edit safe team-interest reaction roles",
+    default_member_permissions: "8",
+    options: [
+      {
+        type: 3,
+        name: "mappings",
+        description: "Optional list such as 🔧=Mechanical, ⚡=Electrical",
+        required: false,
+        max_length: 1_800,
+      },
+    ],
+  },
 ] as const;

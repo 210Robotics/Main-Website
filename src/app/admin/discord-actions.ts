@@ -19,10 +19,12 @@ import { requirePermission } from "@/lib/auth";
 import {
   assignDiscordOnboardingRoles,
   discordConfiguration,
+  inferDiscordDuesPublicChannelIds,
   listDiscordGuildRoles,
   listDiscordVoiceChannels,
   normalizeDiscordReactionEmoji,
   processDiscordOnboarding,
+  publishDiscordReactionRolePanel,
   publishDiscordVerificationPanel,
   registerDiscordCommands,
   sendDiscordCalendarReminders,
@@ -30,6 +32,7 @@ import {
   sendDiscordDirectMessage,
   sendDiscordDirectMessageWithFile,
   sendDiscordMemberBroadcast,
+  sendDiscordMembershipReminders,
   sendDiscordSelectedMemberMessages,
   sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminder,
@@ -422,6 +425,60 @@ export async function postDiscordVerificationPanel(formData: FormData) {
   revalidatePath("/admin");
 }
 
+export async function postDiscordReactionRolePanel(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const mappingSpec = String(formData.get("mappingSpec") || "")
+    .trim()
+    .slice(0, 1_800);
+  const posted = await publishDiscordReactionRolePanel({
+    guildId,
+    mappingSpec: mappingSpec || undefined,
+    createdByMemberId: actor.id,
+  });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_REACTION_ROLE_PANEL_POSTED",
+    entityType: "discord_message",
+    entityId: posted.messageId,
+    details: {
+      guildId,
+      channelId: posted.channelId,
+      roleCount: posted.mappings.length,
+    },
+  });
+  revalidatePath("/admin");
+}
+
+export async function sendDiscordMembershipReminderGroup(formData: FormData) {
+  const actor = await requirePermission("integrations.manage");
+  const guildId = required(formData, "guildId");
+  const group = z
+    .enum([
+      "EVERYONE",
+      "ATTENTION",
+      "DUES",
+      "UNLINKED",
+      "UNVERIFIED",
+      "NICKNAME",
+    ])
+    .parse(required(formData, "group"));
+  const result = await sendDiscordMembershipReminders({ guildId, group });
+  await getDb().insert(auditEvents).values({
+    actorMemberId: actor.id,
+    action: "DISCORD_MEMBERSHIP_REMINDER_GROUP_SENT",
+    entityType: "discord_guild",
+    entityId: guildId,
+    details: {
+      group,
+      selected: result.selected,
+      sent: result.sent,
+      failed: result.failed,
+    },
+  });
+  revalidatePath("/admin");
+}
+
 export async function announceDiscordRecordingSession(
   input: z.input<typeof recordingAnnouncementSchema>,
 ): Promise<DiscordMessageState> {
@@ -604,38 +661,27 @@ export async function saveDiscordDuesAccessSettings(formData: FormData) {
   const actor = await requirePermission("dues.manage");
   const guildId = required(formData, "guildId");
   const enabled = formData.get("duesEnforcementEnabled") === "on";
-  const requestedChannelIds = [
-    ...new Set(
-      formData
-        .getAll("publicChannelId")
-        .map(String)
-        .filter((value) => /^\d{15,22}$/.test(value)),
-    ),
-  ];
-  const channelRows = requestedChannelIds.length
-    ? await getDb()
-        .select({ id: discordChannels.id, name: discordChannels.name })
-        .from(discordChannels)
-        .where(
-          and(
-            eq(discordChannels.guildId, guildId),
-            inArray(discordChannels.id, requestedChannelIds),
-          ),
-        )
-    : [];
-  if (channelRows.length !== requestedChannelIds.length) {
-    throw new Error("One or more selected public Discord channels are invalid.");
-  }
+  const allChannelRows = await getDb()
+    .select()
+    .from(discordChannels)
+    .where(eq(discordChannels.guildId, guildId));
+  const requestedChannelIds = inferDiscordDuesPublicChannelIds(allChannelRows);
+  const publicIdSet = new Set(requestedChannelIds);
+  const channelRows = allChannelRows
+    .filter((channel) => publicIdSet.has(channel.id))
+    .map((channel) => ({ id: channel.id, name: channel.name }));
   if (enabled && !channelRows.length) {
     throw new Error(
-      "Select at least one public channel before enforcing membership dues.",
+      "Create or synchronize a General or Announcements category before enabling membership access enforcement.",
     );
   }
   await getDb()
     .update(discordGuilds)
     .set({
       duesEnforcementEnabled: enabled,
+      verificationEnforcementEnabled: enabled,
       duesPublicChannelIds: requestedChannelIds,
+      verificationPublicChannelIds: requestedChannelIds,
       updatedAt: new Date(),
     })
     .where(eq(discordGuilds.id, guildId));

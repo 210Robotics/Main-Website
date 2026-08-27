@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { inferDiscordOnboardingRoleIds } from "@/lib/discord-role-selection";
+import {
+  discordInterestRoleEmoji,
+  inferDiscordOnboardingRoleIds,
+  isDiscordInterestRole,
+} from "@/lib/discord-role-selection";
 
 const roles = [
   { id: "1", name: "@everyone", position: 0, managed: false },
@@ -42,5 +46,32 @@ describe("Discord onboarding role selection", () => {
       agreedRoleId: "2",
       vexUMemberRoleId: "3",
     });
+  });
+});
+
+describe("Discord interest role safety", () => {
+  it("allows team interests and chooses a matching emoji", () => {
+    const role = {
+      id: "20",
+      name: "Mechanical",
+      position: 2,
+      managed: false,
+    };
+    expect(isDiscordInterestRole(role)).toBe(true);
+    expect(discordInterestRoleEmoji(role)).toBe("🔧");
+  });
+
+  it("rejects privileged and membership roles", () => {
+    for (const name of [
+      "Mechanical Lead",
+      "Officer",
+      "Verified Member",
+      "VEX U Member",
+      "Admin",
+    ]) {
+      expect(
+        isDiscordInterestRole({ id: name, name, position: 2, managed: false }),
+      ).toBe(false);
+    }
   });
 });

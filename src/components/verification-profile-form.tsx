@@ -58,12 +58,11 @@ export function VerificationProfileForm({
           <Errors values={state.errors?.lastName} />
         </label>
       </div>
-      <label className="field">
-        <span>Team display name</span>
-        <input className="input" defaultValue={member.displayName} name="displayName" autoComplete="name" required />
-        <small>Use the recognizable name officers should see on the roster and Discord.</small>
-        <Errors values={state.errors?.displayName} />
-      </label>
+      <div className="border border-[#3d332a] bg-[#15100c] p-4 text-sm leading-6 text-[#bbb]">
+        Your portal name and Discord nickname are generated from the required
+        first and last name fields above. After secure verification, the bot
+        keeps the server nickname in the <strong className="text-white">First Last</strong> format.
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">
           <span>Year or member type</span>
@@ -120,4 +119,3 @@ export function VerificationProfileForm({
     </form>
   );
 }
-

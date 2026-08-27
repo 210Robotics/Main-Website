@@ -2292,6 +2292,40 @@ export const discordVerificationApplications = pgTable(
   ],
 );
 
+export const discordReactionRolePanels = pgTable(
+  "discord_reaction_role_panels",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    guildId: text("guild_id")
+      .notNull()
+      .references(() => discordGuilds.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").notNull(),
+    messageId: text("message_id").notNull(),
+    mappings: jsonb("mappings")
+      .$type<Array<{ emoji: string; roleId: string; roleName: string }>>()
+      .notNull()
+      .default([]),
+    active: boolean("active").notNull().default(true),
+    createdByMemberId: uuid("created_by_member_id").references(
+      () => members.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("discord_reaction_role_panel_guild_idx").on(table.guildId),
+    uniqueIndex("discord_reaction_role_panel_message_idx").on(
+      table.guildId,
+      table.messageId,
+    ),
+  ],
+);
+
 export const discordLinkTokens = pgTable(
   "discord_link_tokens",
   {

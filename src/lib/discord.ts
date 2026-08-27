@@ -24,6 +24,7 @@ import {
   discordGuilds,
   discordLinkTokens,
   discordMessages,
+  discordReactionRolePanels,
   membershipDues,
   members,
 } from "@/db/schema";
@@ -34,7 +35,9 @@ import {
 } from "@/lib/discord-signature";
 import { discordApplicationCommands } from "@/lib/discord-commands";
 import {
+  discordInterestRoleEmoji,
   inferDiscordOnboardingRoleIds,
+  isDiscordInterestRole,
   type DiscordRoleOption,
 } from "@/lib/discord-role-selection";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
@@ -273,13 +276,28 @@ function normalizedDiscordName(value: string) {
 }
 
 export function inferDiscordDuesPublicChannelIds(
-  channels: Array<{ id: string; name: string; type: number }>,
+  channels: Array<{
+    id: string;
+    name: string;
+    type: number;
+    parentId?: string | null;
+  }>,
 ) {
+  const publicCategoryIds = new Set(
+    channels
+      .filter((channel) => {
+        if (channel.type !== 4) return false;
+        const name = normalizedDiscordName(channel.name);
+        return name === "general" || name === "announcements";
+      })
+      .map((channel) => channel.id),
+  );
   return channels
     .filter((channel) => {
       if (!DUES_CHANNEL_TYPES.has(channel.type)) return false;
       const name = normalizedDiscordName(channel.name);
       return (
+        Boolean(channel.parentId && publicCategoryIds.has(channel.parentId)) ||
         name === "general" ||
         name === "main general" ||
         name === "announcements" ||
@@ -1884,6 +1902,415 @@ export async function publishDiscordVerificationPanel(guildId: string) {
   };
 }
 
+function normalizeReactionRoleEmoji(value: string) {
+  const custom = value.trim().match(/^<a?:([^:>]+):(\d{15,22})>$/);
+  if (custom) return `${custom[1]}:${custom[2]}`;
+  const customKey = value.trim().match(/^([A-Za-z0-9_]{2,32}):(\d{15,22})$/);
+  if (customKey) return `${customKey[1]}:${customKey[2]}`;
+  return normalizeDiscordReactionEmoji(value);
+}
+
+function reactionRoleMappingsFromSpec({
+  spec,
+  roles,
+}: {
+  spec?: string;
+  roles: DiscordRoleOption[];
+}) {
+  type ReactionRoleMapping = {
+    emoji: string;
+    roleId: string;
+    roleName: string;
+  };
+  const safeRoles = roles.filter(isDiscordInterestRole);
+  const roleByName = new Map(
+    safeRoles.map((role) => [normalizedDiscordName(role.name), role]),
+  );
+  const usedAutomaticEmojis = new Set<string>();
+  const requested: ReactionRoleMapping[] = spec?.trim()
+    ? spec
+        .split(/[\n,;]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const separator = entry.indexOf("=");
+          if (separator < 1) {
+            throw new Error(
+              "Use emoji=Role Name entries separated by commas or new lines.",
+            );
+          }
+          const emoji = normalizeReactionRoleEmoji(entry.slice(0, separator));
+          const roleName = normalizedDiscordName(entry.slice(separator + 1));
+          const role = roleByName.get(roleName);
+          if (!role) {
+            throw new Error(
+              `“${entry.slice(separator + 1).trim()}” is not an eligible team-interest role. Leadership, permission, membership, and managed roles are blocked.`,
+            );
+          }
+          return { emoji, roleId: role.id, roleName: role.name };
+        })
+    : safeRoles.flatMap((role) => {
+        const emoji = discordInterestRoleEmoji(role);
+        if (!emoji || usedAutomaticEmojis.has(emoji)) return [];
+        usedAutomaticEmojis.add(emoji);
+        return [{ emoji, roleId: role.id, roleName: role.name }];
+      });
+  const mappings = requested.slice(0, 20);
+  if (!mappings.length) {
+    throw new Error(
+      "No eligible interest roles were found. Create roles such as Mechanical, Electrical, Programming, CAD, Manufacturing, Outreach, Media, or Scouting first.",
+    );
+  }
+  if (new Set(mappings.map((mapping) => mapping.emoji)).size !== mappings.length) {
+    throw new Error("Each reaction role must use a different emoji.");
+  }
+  if (new Set(mappings.map((mapping) => mapping.roleId)).size !== mappings.length) {
+    throw new Error("Each team-interest role can appear only once.");
+  }
+  return mappings;
+}
+
+export async function publishDiscordReactionRolePanel({
+  guildId,
+  mappingSpec,
+  createdByMemberId,
+}: {
+  guildId: string;
+  mappingSpec?: string;
+  createdByMemberId?: string;
+}) {
+  if (!/^\d{15,22}$/.test(guildId)) {
+    throw new Error("A valid Discord server ID is required.");
+  }
+  const [channels, roles, [existing]] = await Promise.all([
+    discordFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`),
+    listDiscordGuildRoles(guildId),
+    getDb()
+      .select()
+      .from(discordReactionRolePanels)
+      .where(eq(discordReactionRolePanels.guildId, guildId))
+      .limit(1),
+  ]);
+  const rolesChannel = channels.find((channel) => {
+    if (![0, 5].includes(channel.type)) return false;
+    const name = normalizedDiscordName(channel.name || "");
+    return name === "roles" || name === "role selection" || name === "team roles";
+  });
+  if (!rolesChannel) {
+    throw new Error("The bot cannot find a #roles channel.");
+  }
+  const mappings = reactionRoleMappingsFromSpec({
+    spec: mappingSpec,
+    roles,
+  });
+  const body = JSON.stringify({
+    content: "",
+    embeds: [
+      {
+        title: "Choose your 210 Robotics interests",
+        description:
+          "React below to add or remove team-interest roles. These roles only organize sections and interests—they never grant leadership, administrative, payment, verification, or private-access permissions.",
+        color: 0xfd7803,
+        fields: mappings.map((mapping) => ({
+          name: `${mapping.emoji}  ${mapping.roleName}`,
+          value: `React with ${mapping.emoji} to toggle this interest.`,
+          inline: true,
+        })),
+        footer: {
+          text: "Your verified membership and private-channel access are managed separately through 210robotics.com.",
+        },
+      },
+    ],
+    allowed_mentions: { parse: [] },
+  });
+  let messageId = existing?.messageId || "";
+  let channelId = existing?.channelId || rolesChannel.id;
+  if (messageId) {
+    try {
+      await discordFetch(`/channels/${channelId}/messages/${messageId}`, {
+        method: "PATCH",
+        body,
+      });
+    } catch {
+      messageId = "";
+      channelId = rolesChannel.id;
+    }
+  }
+  if (!messageId) {
+    const posted = await discordFetch<{ id: string }>(
+      `/channels/${rolesChannel.id}/messages`,
+      { method: "POST", body },
+    );
+    messageId = posted.id;
+    channelId = rolesChannel.id;
+  } else {
+    await discordFetch(
+      `/channels/${channelId}/messages/${messageId}/reactions`,
+      { method: "DELETE" },
+    ).catch(() => undefined);
+  }
+  for (const mapping of mappings) {
+    await addDiscordMessageReaction(channelId, messageId, mapping.emoji);
+  }
+  const now = new Date();
+  await getDb()
+    .insert(discordReactionRolePanels)
+    .values({
+      guildId,
+      channelId,
+      messageId,
+      mappings,
+      createdByMemberId,
+      active: true,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: discordReactionRolePanels.guildId,
+      set: {
+        channelId,
+        messageId,
+        mappings,
+        active: true,
+        updatedAt: now,
+      },
+    });
+  await recordDiscordEvent({
+    guildId,
+    kind: "REACTION_ROLE_PANEL_PUBLISHED",
+    metadata: { channelId, messageId, roleCount: mappings.length },
+  });
+  return {
+    channelId,
+    channelName: rolesChannel.name || "roles",
+    messageId,
+    mappings,
+  };
+}
+
+export async function applyDiscordReactionRole({
+  guildId,
+  channelId,
+  messageId,
+  discordUserId,
+  emoji,
+  action,
+}: {
+  guildId: string;
+  channelId: string;
+  messageId: string;
+  discordUserId: string;
+  emoji: string;
+  action: "ADD" | "REMOVE";
+}) {
+  const [panel] = await getDb()
+    .select()
+    .from(discordReactionRolePanels)
+    .where(
+      and(
+        eq(discordReactionRolePanels.guildId, guildId),
+        eq(discordReactionRolePanels.channelId, channelId),
+        eq(discordReactionRolePanels.messageId, messageId),
+        eq(discordReactionRolePanels.active, true),
+      ),
+    )
+    .limit(1);
+  if (!panel) return { applied: false as const, reason: "not-reaction-panel" };
+  const mapping = panel.mappings.find(
+    (item) => item.emoji === normalizeReactionRoleEmoji(emoji),
+  );
+  if (!mapping) return { applied: false as const, reason: "emoji-not-configured" };
+  const roles = await listDiscordGuildRoles(guildId);
+  const role = roles.find((item) => item.id === mapping.roleId);
+  if (!role || !isDiscordInterestRole(role)) {
+    return { applied: false as const, reason: "role-no-longer-eligible" };
+  }
+  await discordFetch(
+    `/guilds/${guildId}/members/${discordUserId}/roles/${mapping.roleId}`,
+    {
+      method: action === "ADD" ? "PUT" : "DELETE",
+      headers: {
+        "X-Audit-Log-Reason": encodeURIComponent(
+          `210 Robotics self-service interest role ${action.toLowerCase()}`,
+        ),
+      },
+    },
+  );
+  const [member] = await getDb()
+    .select()
+    .from(discordGuildMembers)
+    .where(
+      and(
+        eq(discordGuildMembers.guildId, guildId),
+        eq(discordGuildMembers.discordUserId, discordUserId),
+      ),
+    )
+    .limit(1);
+  if (member) {
+    const roles = new Set(member.roles);
+    if (action === "ADD") roles.add(mapping.roleId);
+    else roles.delete(mapping.roleId);
+    await getDb()
+      .update(discordGuildMembers)
+      .set({ roles: [...roles], updatedAt: new Date() })
+      .where(eq(discordGuildMembers.id, member.id));
+  }
+  await recordDiscordEvent({
+    guildId,
+    discordUserId,
+    kind: `REACTION_ROLE_${action}`,
+    metadata: { channelId, messageId, roleId: mapping.roleId, roleName: role.name },
+  });
+  return { applied: true as const, roleId: role.id, roleName: role.name, action };
+}
+
+export type DiscordMembershipReminderGroup =
+  | "EVERYONE"
+  | "ATTENTION"
+  | "DUES"
+  | "UNLINKED"
+  | "UNVERIFIED"
+  | "NICKNAME";
+
+export async function sendDiscordMembershipReminders({
+  guildId,
+  group,
+}: {
+  guildId: string;
+  group: DiscordMembershipReminderGroup;
+}) {
+  const period = currentMembershipPeriod();
+  const rows = await getDb()
+    .select({
+      discord: discordGuildMembers,
+      firstName: members.firstName,
+      lastName: members.lastName,
+      universityEmailVerifiedAt: members.universityEmailVerifiedAt,
+      universityEmailOverrideAt: members.universityEmailOverrideAt,
+      profileCompletedAt: members.profileCompletedAt,
+      duesStatus: membershipDues.status,
+      amountDueCents: membershipDues.amountDueCents,
+      amountPaidCents: membershipDues.amountPaidCents,
+    })
+    .from(discordGuildMembers)
+    .leftJoin(members, eq(members.id, discordGuildMembers.linkedMemberId))
+    .leftJoin(
+      membershipDues,
+      and(
+        eq(membershipDues.memberId, discordGuildMembers.linkedMemberId),
+        eq(membershipDues.period, period),
+      ),
+    )
+    .where(
+      and(
+        eq(discordGuildMembers.guildId, guildId),
+        eq(discordGuildMembers.isBot, false),
+        isNull(discordGuildMembers.leftAt),
+      ),
+    );
+  const status = rows.map((row) => {
+    const canonicalName = [row.firstName, row.lastName]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(" ");
+    const linked = Boolean(row.discord.linkedMemberId);
+    const verified = Boolean(
+      row.universityEmailVerifiedAt || row.universityEmailOverrideAt,
+    );
+    const duesSatisfied =
+      ["WAIVED", "WAIVED_FUNDRAISING"].includes(row.duesStatus || "") ||
+      (row.duesStatus === "PAID" &&
+        (row.amountDueCents || 0) > 0 &&
+        (row.amountPaidCents || 0) >= (row.amountDueCents || 0));
+    const nicknameMatches = Boolean(
+      canonicalName &&
+        normalizedDiscordName(row.discord.displayName) ===
+          normalizedDiscordName(canonicalName),
+    );
+    const profileComplete = Boolean(row.profileCompletedAt && canonicalName);
+    return {
+      ...row,
+      canonicalName,
+      linked,
+      verified,
+      duesSatisfied,
+      nicknameMatches,
+      profileComplete,
+      needsAttention:
+        !linked || !verified || !profileComplete || !duesSatisfied || !nicknameMatches,
+    };
+  });
+  const recipients = status.filter((row) => {
+    if (group === "EVERYONE") return true;
+    if (group === "ATTENTION") return row.needsAttention;
+    if (group === "DUES") return row.linked && !row.duesSatisfied;
+    if (group === "UNLINKED") return !row.linked;
+    if (group === "UNVERIFIED") return !row.verified;
+    return row.linked && !row.nicknameMatches;
+  });
+  let sent = 0;
+  const failures: Array<{ discordUserId: string; reason: string }> = [];
+  for (const row of recipients) {
+    try {
+      const portalUrl = row.linked
+        ? "https://210robotics.com/verify"
+        : await createDiscordLinkToken({
+            guildId,
+            discordUserId: row.discord.discordUserId,
+            username: row.discord.username,
+          });
+      const checklist = [
+        `${row.linked ? "✅" : "○"} Portal account linked`,
+        `${row.verified ? "✅" : "○"} @my.utsa.edu identity verified`,
+        `${row.profileComplete ? "✅" : "○"} First and last name saved in the portal`,
+        `${row.nicknameMatches ? "✅" : "○"} Discord nickname matches First Last`,
+        `${row.duesSatisfied ? "✅" : "○"} ${period} dues paid or waived`,
+      ].join("\n");
+      await sendDiscordDirectMessage({
+        discordUserId: row.discord.discordUserId,
+        content:
+          `**210 Robotics membership verification**\n\n${checklist}\n\n` +
+          "Complete the secure checklist to keep access to private team design, programming, strategy, and documentation channels. Cash App/Zelle payments must be confirmed by an officer; $100+ fundraising waivers use finalized donations attributed to your account.",
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 1,
+                custom_id: `verification:start:${guildId}`,
+                label: "Enter First Last and start verification",
+              },
+              {
+                type: 2,
+                style: 5,
+                label: "Open secure portal checklist",
+                url: portalUrl,
+              },
+            ],
+          },
+        ],
+        log: {
+          username: row.discord.username,
+          displayName: row.discord.displayName,
+          metadata: { kind: "membership-verification-reminder", group, period },
+        },
+      });
+      sent += 1;
+    } catch (error) {
+      failures.push({
+        discordUserId: row.discord.discordUserId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  await recordDiscordEvent({
+    guildId,
+    kind: "MEMBERSHIP_VERIFICATION_REMINDERS_SENT",
+    metadata: { group, selected: recipients.length, sent, failed: failures.length },
+  });
+  return { group, selected: recipients.length, sent, failed: failures.length, failures };
+}
+
 export async function sendDiscordDirectMessage({
   discordUserId,
   content,
@@ -2220,9 +2647,28 @@ export async function handleDiscordMemberJoined({
     discordUserId: member.discordUserId,
     content:
       `Welcome to 210 Robotics, ${member.displayName}!\n\n` +
-      `Discord's ${delayMinutes}-minute security delay is now running. While you wait, complete the protected member-verification checklist:\n${registrationUrl}\n\n` +
-      `You will verify an @my.utsa.edu address, enter your real team display name and academic year, connect this Discord identity, and confirm dues or a waiver. After ${delayMinutes} minutes, eligible member roles and your team nickname will synchronize automatically.\n\n` +
-      `This private link expires in 7 days.`,
+      `Discord's ${delayMinutes}-minute security delay is now running. Until verification is complete, access is limited to the General and Announcements areas.\n\n` +
+      "Use the application below to manually enter your first and last name, then sign in or sign up in the protected portal. The portal independently requires First Name and Last Name as a backup identity check and verifies ownership of your @my.utsa.edu address through Clerk.\n\n" +
+      "After the portal profile, Discord link, and paid/waived dues checks are complete, the bot synchronizes your nickname to **First Last** and unlocks eligible member channels. Cash App and Zelle require officer confirmation; finalized member-attributed fundraising of $100+ earns the configured waiver.",
+    components: [
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 1,
+            custom_id: `verification:start:${guildId}`,
+            label: "Enter First Last",
+          },
+          {
+            type: 2,
+            style: 5,
+            label: "Sign in / sign up in portal",
+            url: registrationUrl,
+          },
+        ],
+      },
+    ],
     log: {
       username: member.username,
       displayName: member.displayName,

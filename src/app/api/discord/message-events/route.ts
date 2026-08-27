@@ -25,6 +25,7 @@ const messageEventSchema = z.object({
   guildName: z.string().trim().min(1).max(120),
   channelId: z.string().regex(/^\d{15,22}$/),
   channelName: z.string().trim().min(1).max(120),
+  parentCategoryName: z.string().trim().max(120).nullable().optional(),
   channelType: z.number().int().min(0).max(16),
   messageId: z.string().regex(/^\d{15,22}$/),
   content: z.string().max(10_000),
@@ -96,19 +97,20 @@ export async function POST(request: Request) {
       .select({
         reactionEnabled: discordGuilds.messageReactionEnabled,
         reactionEmoji: discordGuilds.messageReactionEmoji,
-        duesPublicChannelIds: discordGuilds.duesPublicChannelIds,
-        verificationPublicChannelIds: discordGuilds.verificationPublicChannelIds,
       })
       .from(discordGuilds)
       .where(eq(discordGuilds.id, data.guildId))
       .limit(1);
     const protectedContent = redactLikelySecrets(data.content);
-    const publicChannelIds = new Set([
-      ...(guildSettings?.duesPublicChannelIds || []),
-      ...(guildSettings?.verificationPublicChannelIds || []),
-    ]);
+    const attachmentRestrictedArea = [
+      data.channelName,
+      data.parentCategoryName || "",
+    ].some((value) => {
+      const name = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      return name === "general" || name === "announcements";
+    });
     const sensitivePublicAttachment =
-      publicChannelIds.has(data.channelId) &&
+      attachmentRestrictedArea &&
       hasSensitiveEngineeringAttachment(data.attachments.map((item) => item.filename));
     const moderationAction = protectedContent.matches
       ? "REMOVE_SECRET"

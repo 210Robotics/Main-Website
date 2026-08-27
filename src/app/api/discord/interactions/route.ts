@@ -12,10 +12,12 @@ import {
   createDiscordLinkToken,
   discordConfiguration,
   publishDiscordVerificationPanel,
+  publishDiscordReactionRolePanel,
   recordDiscordEvent,
   sendDiscordCalendarReminders,
   sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminder,
+  sendDiscordMembershipReminders,
   setDiscordGuildMemberTimeout,
   syncDiscordDuesAccessForMember,
   syncDiscordGuild,
@@ -169,11 +171,13 @@ async function sendInteractionFollowup({
     throw new Error(`Discord follow-up failed (${response.status}).`);
 }
 
-function verificationApplicationModal() {
+function verificationApplicationModal(guildId?: string) {
   return NextResponse.json({
     type: 9,
     data: {
-      custom_id: "verification:submit",
+      custom_id: guildId
+        ? `verification:submit:${guildId}`
+        : "verification:submit",
       title: "210 Robotics verification",
       components: [
         {
@@ -266,7 +270,9 @@ function handleDiscordVerificationApplication(
   interaction: DiscordInteraction,
   user?: DiscordUser,
 ) {
-  const guildId = interaction.guild_id || interaction.guild?.id || "";
+  const encodedGuildId = interaction.data?.custom_id?.split(":")[2] || "";
+  const guildId =
+    interaction.guild_id || interaction.guild?.id || encodedGuildId;
   const parsed = parseDiscordVerificationApplication({
     firstName: modalValue(interaction, "first_name"),
     lastName: modalValue(interaction, "last_name"),
@@ -559,13 +565,14 @@ export async function POST(request: Request) {
   if (interaction.type === 1) return NextResponse.json({ type: 1 });
   const user = interaction.member?.user || interaction.user;
   if (interaction.type === 3) {
-    if (interaction.data?.custom_id === "verification:start") {
-      return verificationApplicationModal();
+    if (interaction.data?.custom_id?.startsWith("verification:start")) {
+      const guildId = interaction.data.custom_id.split(":")[2];
+      return verificationApplicationModal(guildId);
     }
     return handleDiscordDmChoice(interaction, user);
   }
   if (interaction.type === 5) {
-    if (interaction.data?.custom_id === "verification:submit") {
+    if (interaction.data?.custom_id?.startsWith("verification:submit")) {
       return handleDiscordVerificationApplication(interaction, user);
     }
     return handleDiscordDmManualReply(interaction, user);
@@ -682,6 +689,9 @@ export async function POST(request: Request) {
         "stopall",
         "voice",
         "verification-panel",
+        "verification",
+        "member-reminders",
+        "roles",
       ].includes(commandName) &&
       !isAdministrator(interaction.member?.permissions)
     ) {
@@ -818,6 +828,103 @@ export async function POST(request: Request) {
               error instanceof Error
                 ? error.message
                 : "The verification application could not be posted.",
+          }).catch(() => undefined);
+        }
+      });
+      return deferredInteractionResponse();
+    }
+
+    if (commandName === "verification" || commandName === "member-reminders") {
+      const applicationId =
+        interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+      const interactionToken = interaction.token || "";
+      if (!applicationId || !interactionToken) {
+        return interactionResponse(
+          "Discord did not provide enough information to send verification reminders.",
+        );
+      }
+      const requestedGroup = String(
+        interaction.data?.options?.find((option) => option.name === "group")
+          ?.value || (commandName === "verification" ? "EVERYONE" : "ATTENTION"),
+      ).toUpperCase();
+      const group = [
+        "EVERYONE",
+        "ATTENTION",
+        "DUES",
+        "UNLINKED",
+        "UNVERIFIED",
+        "NICKNAME",
+      ].includes(requestedGroup)
+        ? (requestedGroup as Parameters<
+            typeof sendDiscordMembershipReminders
+          >[0]["group"])
+        : "ATTENTION";
+      after(async () => {
+        try {
+          if (commandName === "verification") {
+            await publishDiscordVerificationPanel(guildId);
+          }
+          const result = await sendDiscordMembershipReminders({ guildId, group });
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content:
+              `Verification outreach complete: ${result.sent} of ${result.selected} selected members received a private checklist.` +
+              (result.failed
+                ? ` ${result.failed} DMs failed because Discord did not accept them.`
+                : ""),
+          });
+        } catch (error) {
+          console.error("Discord membership reminder command failed", error);
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content:
+              error instanceof Error
+                ? error.message
+                : "Verification reminders could not be sent.",
+          }).catch(() => undefined);
+        }
+      });
+      return deferredInteractionResponse();
+    }
+
+    if (commandName === "roles") {
+      const applicationId =
+        interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
+      const interactionToken = interaction.token || "";
+      const mappingSpec = String(
+        interaction.data?.options?.find((option) => option.name === "mappings")
+          ?.value || "",
+      )
+        .trim()
+        .slice(0, 1_800);
+      if (!applicationId || !interactionToken) {
+        return interactionResponse(
+          "Discord did not provide enough information to update reaction roles.",
+        );
+      }
+      after(async () => {
+        try {
+          const result = await publishDiscordReactionRolePanel({
+            guildId,
+            mappingSpec: mappingSpec || undefined,
+            createdByMemberId: guildMember.linkedMemberId || undefined,
+          });
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content: `The #${result.channelName} reaction-role panel now has ${result.mappings.length} safe team-interest roles.`,
+          });
+        } catch (error) {
+          console.error("Discord reaction-role command failed", error);
+          await sendInteractionFollowup({
+            applicationId,
+            token: interactionToken,
+            content:
+              error instanceof Error
+                ? error.message
+                : "Reaction roles could not be updated.",
           }).catch(() => undefined);
         }
       });
@@ -1107,7 +1214,7 @@ export async function POST(request: Request) {
       );
     }
     return interactionResponse(
-      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /logs, /calendar, /digest, /timeout, /verification-panel, /register, /status, /dues, or /team.",
+      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /logs, /calendar, /digest, /timeout, /verification, /member-reminders, /roles, /register, /status, /dues, or /team.",
     );
   } catch (error) {
     console.error("Discord interaction failed", error);
