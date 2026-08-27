@@ -860,6 +860,9 @@ async function setDiscordSensitiveAreaAccess({
     );
   });
   const leadershipRoles = roles.filter(discordLeadershipRole);
+  const executiveRoleIds = new Set(
+    roles.filter(discordExecutiveRole).map((role) => role.id),
+  );
   for (const channel of announcementChannels) {
     await updateDiscordPermissionOverwrite({
       channel,
@@ -871,8 +874,12 @@ async function setDiscordSensitiveAreaAccess({
       await updateDiscordPermissionOverwrite({
         channel,
         targetId: role.id,
-        allowBits: DISCORD_ANNOUNCEMENT_READ_ONLY_PERMISSIONS,
-        reason: "210 Robotics announcement publishing access",
+        ...(executiveRoleIds.has(role.id)
+          ? { allowBits: DISCORD_ANNOUNCEMENT_READ_ONLY_PERMISSIONS }
+          : { denyBits: DISCORD_ANNOUNCEMENT_READ_ONLY_PERMISSIONS }),
+        reason: executiveRoleIds.has(role.id)
+          ? "210 Robotics executive announcement publishing access"
+          : "210 Robotics team leads have read-only announcements",
       });
     }
   }
