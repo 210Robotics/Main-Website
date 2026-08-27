@@ -8,6 +8,10 @@ import { auditEvents, members } from "@/db/schema";
 import { getCurrentMember, synchronizeCurrentMemberIdentity } from "@/lib/auth";
 import { reconcileMemberMembership } from "@/lib/membership-access-server";
 import { academicLevels } from "@/lib/membership-policy";
+import {
+  canonicalMemberName,
+  normalizedMemberNameParts,
+} from "@/lib/member-name";
 
 export type VerificationProfileState = {
   status: "idle" | "success" | "error";
@@ -55,12 +59,16 @@ export async function saveVerificationProfile(
     };
   }
   const now = new Date();
-  const canonicalName = `${parsed.data.firstName} ${parsed.data.lastName}`;
+  const name = normalizedMemberNameParts(
+    parsed.data.firstName,
+    parsed.data.lastName,
+  );
+  const canonicalName = canonicalMemberName(name);
   await getDb()
     .update(members)
     .set({
-      firstName: parsed.data.firstName,
-      lastName: parsed.data.lastName,
+      firstName: name.firstName,
+      lastName: name.lastName,
       displayName: canonicalName,
       academicLevel: parsed.data.academicLevel,
       major: parsed.data.major,

@@ -42,6 +42,10 @@ import {
 } from "@/lib/discord-role-selection";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
 import { reconcileMemberMembership } from "@/lib/membership-access-server";
+import {
+  canonicalMemberName,
+  normalizedMemberNameParts,
+} from "@/lib/member-name";
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -75,6 +79,12 @@ type DiscordChannel = {
   parent_id?: string | null;
   position?: number;
   thread_metadata?: { archived?: boolean };
+  permission_overwrites?: Array<{
+    id: string;
+    type: number;
+    allow: string;
+    deny: string;
+  }>;
 };
 
 type DiscordRole = {
@@ -283,6 +293,15 @@ export async function upsertDiscordGuild({
 }
 
 const DISCORD_VIEW_CHANNEL_PERMISSION = "1024";
+const DISCORD_SEND_MESSAGES_PERMISSION = BigInt(1) << BigInt(11);
+const DISCORD_CREATE_PUBLIC_THREADS_PERMISSION = BigInt(1) << BigInt(35);
+const DISCORD_CREATE_PRIVATE_THREADS_PERMISSION = BigInt(1) << BigInt(36);
+const DISCORD_SEND_MESSAGES_IN_THREADS_PERMISSION = BigInt(1) << BigInt(38);
+const DISCORD_ANNOUNCEMENT_READ_ONLY_PERMISSIONS =
+  DISCORD_SEND_MESSAGES_PERMISSION |
+  DISCORD_CREATE_PUBLIC_THREADS_PERMISSION |
+  DISCORD_CREATE_PRIVATE_THREADS_PERMISSION |
+  DISCORD_SEND_MESSAGES_IN_THREADS_PERMISSION;
 const DISCORD_ADMINISTRATOR_PERMISSION = 8;
 const DUES_PAID_ROLE_NAME = "Membership Paid";
 const DUES_UNPAID_ROLE_NAME = "Membership Not Paid";
@@ -540,6 +559,124 @@ async function setDiscordDuesChannelAccess({
   return { restricted, inspected: channels.length };
 }
 
+function discordLeadershipRole(role: DiscordRole) {
+  const permissions = BigInt(role.permissions || "0");
+  return (
+    (permissions & BigInt(DISCORD_ADMINISTRATOR_PERMISSION)) !== BigInt(0) ||
+    /\b(admins?|administrators?|officers?|directors?|leads?|captains?|executive|board)\b/i.test(
+      role.name,
+    )
+  );
+}
+
+async function updateDiscordPermissionOverwrite({
+  channel,
+  targetId,
+  allowBits = BigInt(0),
+  denyBits = BigInt(0),
+  reason,
+}: {
+  channel: DiscordChannel;
+  targetId: string;
+  allowBits?: bigint;
+  denyBits?: bigint;
+  reason: string;
+}) {
+  const existing = channel.permission_overwrites?.find(
+    (overwrite) => overwrite.id === targetId && overwrite.type === 0,
+  );
+  const allow = (BigInt(existing?.allow || "0") | allowBits) & ~denyBits;
+  const deny = (BigInt(existing?.deny || "0") | denyBits) & ~allowBits;
+  await discordFetch(`/channels/${channel.id}/permissions/${targetId}`, {
+    method: "PUT",
+    headers: { "X-Audit-Log-Reason": encodeURIComponent(reason) },
+    body: JSON.stringify({ type: 0, allow: String(allow), deny: String(deny) }),
+  });
+}
+
+async function setDiscordSensitiveAreaAccess({
+  guildId,
+  roles,
+}: {
+  guildId: string;
+  roles: DiscordRole[];
+}) {
+  const channels = await discordFetch<DiscordChannel[]>(
+    `/guilds/${guildId}/channels`,
+  );
+  const leadershipCategories = new Set(
+    channels
+      .filter(
+        (channel) =>
+          channel.type === 4 &&
+          /\b(leadership|officers?|executive|board)\b/.test(
+            normalizedDiscordName(channel.name || ""),
+          ),
+      )
+      .map((channel) => channel.id),
+  );
+  const announcementCategories = new Set(
+    channels
+      .filter(
+        (channel) =>
+          channel.type === 4 &&
+          /\bannouncements?\b/.test(normalizedDiscordName(channel.name || "")),
+      )
+      .map((channel) => channel.id),
+  );
+  const leadershipChannels = channels.filter(
+    (channel) =>
+      leadershipCategories.has(channel.id) ||
+      Boolean(channel.parent_id && leadershipCategories.has(channel.parent_id)),
+  );
+  const announcementChannels = channels.filter((channel) => {
+    const name = normalizedDiscordName(channel.name || "");
+    return (
+      announcementCategories.has(channel.id) ||
+      Boolean(channel.parent_id && announcementCategories.has(channel.parent_id)) ||
+      (channel.type !== 4 && /\bannouncements?\b/.test(name))
+    );
+  });
+  const leadershipRoles = roles.filter(discordLeadershipRole);
+  for (const channel of leadershipChannels) {
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: guildId,
+      denyBits: BigInt(DISCORD_VIEW_CHANNEL_PERMISSION),
+      reason: "210 Robotics leadership category privacy",
+    });
+    for (const role of leadershipRoles) {
+      await updateDiscordPermissionOverwrite({
+        channel,
+        targetId: role.id,
+        allowBits: BigInt(DISCORD_VIEW_CHANNEL_PERMISSION),
+        reason: "210 Robotics leadership category access",
+      });
+    }
+  }
+  for (const channel of announcementChannels) {
+    await updateDiscordPermissionOverwrite({
+      channel,
+      targetId: guildId,
+      denyBits: DISCORD_ANNOUNCEMENT_READ_ONLY_PERMISSIONS,
+      reason: "210 Robotics announcements are read-only",
+    });
+    for (const role of leadershipRoles) {
+      await updateDiscordPermissionOverwrite({
+        channel,
+        targetId: role.id,
+        allowBits: DISCORD_ANNOUNCEMENT_READ_ONLY_PERMISSIONS,
+        reason: "210 Robotics announcement publishing access",
+      });
+    }
+  }
+  return {
+    leadershipChannels: leadershipChannels.length,
+    announcementChannels: announcementChannels.length,
+    leadershipRoles: leadershipRoles.length,
+  };
+}
+
 export async function syncDiscordDuesAccess({
   guildId,
   linkedMemberId,
@@ -698,10 +835,15 @@ export async function syncDiscordDuesAccess({
       }
     }
     let nicknameSynchronized = false;
-    const canonicalName = [row.firstName, row.lastName]
-      .map((part) => part?.trim())
-      .filter(Boolean)
-      .join(" ") || row.displayName;
+    const normalizedName = normalizedMemberNameParts(
+      row.firstName,
+      row.lastName,
+    );
+    const canonicalName = canonicalMemberName({
+      firstName: normalizedName.firstName,
+      lastName: normalizedName.lastName,
+      fallback: row.displayName,
+    });
     if (
       row.discord.linkedMemberId &&
       row.nicknameSyncEnabled &&
@@ -745,10 +887,25 @@ export async function syncDiscordDuesAccess({
         updatedAt: synchronizedAt,
       })
       .where(eq(discordGuildMembers.id, row.discord.id));
-    if (nicknameSynchronized && row.discord.linkedMemberId) {
+    if (
+      row.discord.linkedMemberId &&
+      canonicalName &&
+      (nicknameSynchronized ||
+        canonicalName !== row.displayName ||
+        normalizedName.firstName !== row.firstName ||
+        normalizedName.lastName !== row.lastName)
+    ) {
       await getDb()
         .update(members)
-        .set({ discordNicknameSyncedAt: synchronizedAt, updatedAt: synchronizedAt })
+        .set({
+          firstName: normalizedName.firstName,
+          lastName: normalizedName.lastName,
+          displayName: canonicalName,
+          ...(nicknameSynchronized
+            ? { discordNicknameSyncedAt: synchronizedAt }
+            : {}),
+          updatedAt: synchronizedAt,
+        })
         .where(eq(members.id, row.discord.linkedMemberId));
     }
     if (!enabled || isExempt) exempt += 1;
@@ -757,6 +914,11 @@ export async function syncDiscordDuesAccess({
   }
 
   let channelResult = { restricted: 0, inspected: 0 };
+  let sensitiveAreaResult = {
+    leadershipChannels: 0,
+    announcementChannels: 0,
+    leadershipRoles: 0,
+  };
   if (configureChannels) {
     channelResult = await setDiscordDuesChannelAccess({
       guildId,
@@ -768,6 +930,10 @@ export async function syncDiscordDuesAccess({
           ...(guild.verificationPublicChannelIds || []),
         ]),
       ],
+    });
+    sensitiveAreaResult = await setDiscordSensitiveAreaAccess({
+      guildId,
+      roles: roleState.roles,
     });
   }
   const now = new Date();
@@ -786,6 +952,7 @@ export async function syncDiscordDuesAccess({
       exempt,
       changed,
       restrictedChannels: channelResult.restricted,
+      ...sensitiveAreaResult,
     },
   });
   return {
@@ -796,6 +963,7 @@ export async function syncDiscordDuesAccess({
     exempt,
     changed,
     ...channelResult,
+    ...sensitiveAreaResult,
     paidRoleId: roleState.paidRole.id,
     unpaidRoleId: roleState.unpaidRole.id,
   };
@@ -2232,12 +2400,12 @@ export async function sendDiscordMembershipReminders({
         eq(discordGuildMembers.isBot, false),
         isNull(discordGuildMembers.leftAt),
       ),
-    );
+  );
   const status = rows.map((row) => {
-    const canonicalName = [row.firstName, row.lastName]
-      .map((value) => value?.trim())
-      .filter(Boolean)
-      .join(" ");
+    const canonicalName = canonicalMemberName({
+      firstName: row.firstName,
+      lastName: row.lastName,
+    });
     const linked = Boolean(row.discord.linkedMemberId);
     const verified = Boolean(
       row.universityEmailVerifiedAt || row.universityEmailOverrideAt,

@@ -3,6 +3,7 @@ import {
   normalizeEmail,
   type AcademicLevel,
 } from "@/lib/membership-policy";
+import { normalizedMemberNameParts } from "@/lib/member-name";
 
 export const discordVerificationDuesMethods = [
   "CASH_APP",
@@ -74,8 +75,12 @@ export function parseDiscordVerificationApplication(input: {
 }):
   | { success: true; data: DiscordVerificationApplicationInput }
   | { success: false; message: string } {
-  const firstName = cleanName(input.firstName);
-  const lastName = cleanName(input.lastName);
+  const cleanedName = normalizedMemberNameParts(
+    cleanName(input.firstName),
+    cleanName(input.lastName),
+  );
+  const firstName = cleanedName.firstName;
+  const lastName = cleanedName.lastName;
   const universityEmail = normalizeEmail(input.universityEmail);
   const academicLevel = parseAcademicLevel(input.academicLevel);
   const duesMethod = parseDuesMethod(input.duesMethod);

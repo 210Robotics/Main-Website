@@ -18,6 +18,7 @@ import {
   discordGuildMembers,
   discordGuilds,
   discordMessages,
+  discordReactionRolePanels,
   discordVerificationApplications,
   membershipDues,
   members,
@@ -58,6 +59,7 @@ import { DiscordSectionMenu } from "@/components/discord-section-menu";
 import { DiscordVoiceSpeaker } from "@/components/discord-voice-speaker";
 import { requirePermission } from "@/lib/auth";
 import { currentMembershipPeriod } from "@/lib/membership-dues";
+import { canonicalMemberName } from "@/lib/member-name";
 import {
   checkDiscordGuildAccess,
   discordConfiguration,
@@ -122,6 +124,7 @@ export async function DiscordAdminPanel({
     liveVoiceChannels,
     guildRoles,
     verificationApplications,
+    reactionRolePanels,
   ] = await Promise.all([
     guild
       ? getDb()
@@ -283,7 +286,15 @@ export async function DiscordAdminPanel({
           .orderBy(desc(discordVerificationApplications.submittedAt))
           .limit(100)
       : Promise.resolve([]),
+    guild
+      ? getDb()
+          .select()
+          .from(discordReactionRolePanels)
+          .where(eq(discordReactionRolePanels.guildId, guild.id))
+          .limit(1)
+      : Promise.resolve([]),
   ]);
+  const reactionRolePanel = reactionRolePanels[0];
   const linked = discordMembers.filter((row) => row.discord.linkedMemberId);
   const unlinked = discordMembers.filter(
     (row) => !row.discord.linkedMemberId,
@@ -306,10 +317,10 @@ export async function DiscordAdminPanel({
       ),
   );
   const linkedMemberHealth = linked.map((row) => {
-    const canonicalName = [row.memberFirstName, row.memberLastName]
-      .map((value) => value?.trim())
-      .filter(Boolean)
-      .join(" ");
+    const canonicalName = canonicalMemberName({
+      firstName: row.memberFirstName,
+      lastName: row.memberLastName,
+    });
     const normalized = (value: string) =>
       value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const verified = Boolean(
@@ -984,7 +995,18 @@ export async function DiscordAdminPanel({
                   name="mappingSpec"
                   maxLength={1_800}
                   placeholder="🔧=Mechanical, ⚡=Electrical, 💻=Programming"
+                  defaultValue={(reactionRolePanel?.mappings || [])
+                    .map((mapping) => `${mapping.emoji}=${mapping.roleName}`)
+                    .join(", ")}
                 />
+                {reactionRolePanel ? (
+                  <p className="text-xs leading-5 text-[#aaa]">
+                    Editing {reactionRolePanel.mappings.length} active mappings.
+                    Remove a line to remove that reaction, change the emoji or
+                    role name, then publish to update the existing Discord
+                    message.
+                  </p>
+                ) : null}
                 <button className="button justify-center sm:w-fit">
                   Publish / update reaction roles
                 </button>
