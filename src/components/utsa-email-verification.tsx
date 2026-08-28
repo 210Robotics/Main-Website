@@ -1,39 +1,14 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
-import { refreshUniversityVerification } from "@/app/verify/actions";
-
-type VerificationAddress = {
-  id: string;
-  emailAddress: string;
-  verification: { status: string | null };
-  prepareVerification: (params: { strategy: "email_code" }) => Promise<unknown>;
-  attemptVerification: (params: { code: string }) => Promise<{
-    verification: { status: string | null };
-  }>;
-};
-
-function clerkErrorMessage(error: unknown) {
-  if (
-    error &&
-    typeof error === "object" &&
-    "errors" in error &&
-    Array.isArray(error.errors)
-  ) {
-    const first = error.errors[0] as { longMessage?: string; message?: string };
-    return first?.longMessage || first?.message || "Clerk could not verify that email.";
-  }
-  return error instanceof Error
-    ? error.message
-    : "Clerk could not verify that email.";
-}
+import { useState } from "react";
+import {
+  sendUniversityVerificationCode,
+  verifyUniversityEmailCode,
+} from "@/app/verify/actions";
 
 export function UtsaEmailVerification() {
-  const { isLoaded, user } = useUser();
   const router = useRouter();
-  const verificationAddress = useRef<VerificationAddress | null>(null);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
@@ -42,7 +17,6 @@ export function UtsaEmailVerification() {
   const [error, setError] = useState("");
 
   async function sendCode() {
-    if (!user) return;
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail.endsWith("@my.utsa.edu")) {
       setError("Enter your official @my.utsa.edu email address.");
@@ -52,34 +26,20 @@ export function UtsaEmailVerification() {
     setError("");
     setMessage("");
     try {
-      let address = user.emailAddresses.find(
-        (candidate) => candidate.emailAddress.toLowerCase() === normalizedEmail,
-      ) as VerificationAddress | undefined;
-      if (!address) {
-        address = (await user.createEmailAddress({
-          email: normalizedEmail,
-        })) as VerificationAddress;
-      }
-      if (address.verification.status === "verified") {
-        await refreshUniversityVerification();
-        router.refresh();
-        setMessage("Your UTSA email is already verified through Clerk.");
-        return;
-      }
-      await address.prepareVerification({ strategy: "email_code" });
-      verificationAddress.current = address;
-      setCodeSent(true);
-      setMessage(`Clerk sent a verification code to ${normalizedEmail}.`);
+      const result = await sendUniversityVerificationCode(normalizedEmail);
+      if (result.status === "error") throw new Error(result.message);
+      setCodeSent(!result.verified);
+      setMessage(result.message);
+      if (result.verified) router.refresh();
     } catch (verificationError) {
-      setError(clerkErrorMessage(verificationError));
+      setError(verificationError instanceof Error ? verificationError.message : "The verification email could not be sent.");
     } finally {
       setPending(false);
     }
   }
 
   async function verifyCode() {
-    const address = verificationAddress.current;
-    if (!address || !user) {
+    if (!codeSent) {
       setError("Send a new verification code first.");
       return;
     }
@@ -91,16 +51,12 @@ export function UtsaEmailVerification() {
     setError("");
     setMessage("");
     try {
-      const result = await address.attemptVerification({ code: code.trim() });
-      if (result.verification.status !== "verified") {
-        throw new Error("The verification code was not accepted.");
-      }
-      await user.reload();
-      await refreshUniversityVerification();
-      setMessage("UTSA email verified. Your membership access is being synchronized.");
+      const result = await verifyUniversityEmailCode(code.trim());
+      if (result.status === "error") throw new Error(result.message);
+      setMessage(result.message);
       router.refresh();
     } catch (verificationError) {
-      setError(clerkErrorMessage(verificationError));
+      setError(verificationError instanceof Error ? verificationError.message : "The verification code was not accepted.");
     } finally {
       setPending(false);
     }
@@ -110,8 +66,8 @@ export function UtsaEmailVerification() {
     <div className="card p-6">
       <h2 className="text-lg font-bold">Verify your UTSA email</h2>
       <p className="mt-3 text-sm leading-6 text-[#aaa]">
-        Clerk sends a one-time code to your official student inbox. Entering an
-        address alone never grants access.
+        We send a one-time code to your official student inbox. Your Clerk
+        identity is marked verified only after you enter the correct code.
       </p>
       <label className="field mt-5">
         <span>UTSA student email</span>
@@ -122,14 +78,14 @@ export function UtsaEmailVerification() {
           placeholder="abc123@my.utsa.edu"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          disabled={!isLoaded || pending}
+          disabled={pending}
         />
       </label>
       <button
         className="button secondary mt-3 w-full justify-center"
         type="button"
         onClick={sendCode}
-        disabled={!isLoaded || !user || pending}
+        disabled={pending}
       >
         {pending && !codeSent ? "Sending…" : "Send verification code"}
       </button>

@@ -24,3 +24,10 @@ export function confirmationEmail(name: string, kind: string) {
   const next = kind === "join" ? "A team officer will follow up with meeting and onboarding details." : kind === "sponsor" ? "Our partnerships team will review your note and follow up directly." : "A 210 Robotics officer will review your message and respond soon.";
   return shell("We received your message", `<p style="line-height:1.7">Hi ${escapeHtml(name)},</p><p style="line-height:1.7">Thanks for reaching out to 210 Robotics. ${escapeHtml(next)}</p><p style="line-height:1.7">You can reply to this email if you need to add anything.</p>`);
 }
+
+export function universityVerificationEmail(code: string) {
+  return shell(
+    "Verify your UTSA email",
+    `<p style="line-height:1.7">Enter this one-time code in the 210 Robotics verification page:</p><p style="margin:28px 0;padding:20px;background:#080808;border:1px solid #333;color:#fff;font-size:32px;font-weight:800;letter-spacing:10px;text-align:center">${escapeHtml(code)}</p><p style="line-height:1.7;color:#bbb">This code expires in 10 minutes. If you did not request it, you can safely ignore this email.</p>`,
+  );
+}

@@ -253,6 +253,13 @@
       "when": 1787866100252,
       "tag": "0035_white_thundra",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787883528167,
+      "tag": "0036_loud_harry_osborn",
+      "breakpoints": true
     }
   ]
 }

@@ -177,6 +177,39 @@ export const members = pgTable("members", {
   index("member_access_state_idx").on(table.accessState, table.status),
 ]);
 
+export const universityEmailVerificationChallenges = pgTable(
+  "university_email_verification_challenges",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" })
+      .unique(),
+    clerkEmailAddressId: text("clerk_email_address_id").notNull(),
+    email: text("email").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    sendCount: integer("send_count").notNull().default(1),
+    sendWindowStartedAt: timestamp("send_window_started_at", {
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("university_email_verification_expiry_idx").on(table.expiresAt)],
+);
+
 export const projects = pgTable("projects", {
   id: uuid("id").defaultRandom().primaryKey(),
   slug: text("slug").notNull().unique(),
