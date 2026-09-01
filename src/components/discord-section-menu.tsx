@@ -6,7 +6,6 @@ const sections = [
   { id: "discord-overview", label: "Overview & setup" },
   { id: "discord-dues-access", label: "Membership dues & channel access" },
   { id: "discord-onboarding", label: "Join DMs, delay & automatic roles" },
-  { id: "discord-calendar", label: "Calendar reminders & digest" },
   {
     id: "discord-transcription",
     label: "Voice recordings & screen share",
@@ -88,7 +87,7 @@ export function DiscordSectionMenu() {
       </label>
       <p className="mt-3 text-xs leading-5 text-[#777]">
         Only the selected workspace is shown, keeping member lists, recording,
-        calendar announcements, messages, and logs easy to find.
+        messages, recordings, member access, and logs easy to find.
       </p>
     </div>
   );

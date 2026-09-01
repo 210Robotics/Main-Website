@@ -1650,25 +1650,12 @@ export async function syncDiscordMessages(requestedGuildId?: string) {
       verificationFailures,
     },
   });
-  const archive = await publishDiscordMessageArchive(guild.id).catch(
-    (error: unknown) => {
-      console.error("Discord Botlog archive could not be published", error);
-      return {
-        published: false,
-        reason:
-          error instanceof Error
-            ? error.message
-            : "Archive publication failed.",
-      };
-    },
-  );
   return {
     guildId: guild.id,
     channelsRead,
     messagesSaved,
     messagesVerified,
     verificationFailures,
-    archive,
   };
 }
 
@@ -2145,14 +2132,12 @@ export async function sendDiscordChannelMessage({
   channelId,
   channelName,
   content,
-  allowedUserIds,
-  allowEveryone = false,
 }: {
   guildId: string;
   channelId: string;
   channelName: string;
   content: string;
-  allowedUserIds: string[];
+  allowedUserIds?: string[];
   allowEveryone?: boolean;
 }) {
   const message = await discordFetch<DiscordMessage>(
@@ -2162,8 +2147,8 @@ export async function sendDiscordChannelMessage({
       body: JSON.stringify({
         content,
         allowed_mentions: {
-          parse: allowEveryone ? ["everyone"] : [],
-          users: allowedUserIds,
+          parse: [],
+          users: [],
           roles: [],
           replied_user: false,
         },
@@ -2228,8 +2213,8 @@ export async function sendDiscordChannelMessage({
       channelId,
       channelName,
       messageId: message.id,
-      mentionedUsers: allowedUserIds.length,
-      mentionedEveryone: allowEveryone,
+      mentionedUsers: 0,
+      mentionedEveryone: false,
       verified,
     },
   });

@@ -66,10 +66,8 @@ import { parseOnshapeBom } from "@/lib/onshape-bom";
 import { getCalendarEvents } from "@/lib/calendar";
 import {
   notifyDiscordAdmin,
-  sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
   sendDiscordDirectMessage,
-  sendDiscordMonthlyCalendarDigest,
   setDiscordGuildMemberTimeout,
   syncDiscordGuild,
   syncDiscordMessages,
@@ -861,36 +859,18 @@ export async function executeAssistantCommand(input: {
       const discordActor = await requirePermission("integrations.manage");
       const guild = await resolveDiscordGuild();
       const channel = await resolveDiscordChannel(guild.id, command.channel);
-      const recipients = await Promise.all(
-        command.mentions.map((member) =>
-          resolveLinkedDiscordMember(guild.id, member, discordActor.id),
-        ),
-      );
-      const userIds = recipients.map(
-        ({ discordMember }) => discordMember.discordUserId,
-      );
-      const tags = userIds
-        .filter((id) => !command.message.includes(`<@${id}>`))
-        .map((id) => `<@${id}>`)
-        .join(" ");
-      const everyonePrefix =
-        command.mentionEveryone &&
-        !/@(?:everyone|here)\b/i.test(command.message)
-          ? "@everyone\n"
-          : "";
-      const content =
-        `${everyonePrefix}${command.message}${tags ? `\n${tags}` : ""}`;
+      const content = command.message;
       if (content.length > 2_000)
         throw new Error(
-          "The Discord message is too long after adding member mentions.",
+          "The Discord message is longer than Discord's 2,000-character limit.",
         );
       const sent = await sendDiscordChannelMessage({
         guildId: guild.id,
         channelId: channel.id,
         channelName: channel.name,
         content,
-        allowedUserIds: userIds,
-        allowEveryone: command.mentionEveryone,
+        allowedUserIds: [],
+        allowEveryone: false,
       });
       await audit(
         discordActor.id,
@@ -901,14 +881,14 @@ export async function executeAssistantCommand(input: {
           prompt,
           guildId: guild.id,
           channelId: channel.id,
-          mentionedMemberIds: recipients.map(({ member }) => member.id),
-          mentionedEveryone: command.mentionEveryone,
+          mentionedMemberIds: [],
+          mentionedEveryone: false,
         },
       );
       refresh();
       return {
         status: "success",
-        message: `Sent the message to **#${channel.name}**${command.mentionEveryone ? " and tagged **@everyone**" : ""}${recipients.length ? ` and tagged ${recipients.map(({ member }) => member.displayName).join(", ")}` : ""}.`,
+        message: `Sent the message silently to **#${channel.name}** without notification pings.`,
         href: "/admin?tab=discord#discord-channel-messages",
       };
     }
@@ -971,46 +951,6 @@ export async function executeAssistantCommand(input: {
             ? `, saved **${messageSync.messagesSaved} new messages**, and marked **${messageSync.messagesVerified}** with a green check across ${messageSync.channelsRead} channels.`
             : "."),
         href: "/admin?tab=discord",
-      };
-    }
-    if (command.kind === "DISCORD_CALENDAR_REMINDERS") {
-      const discordActor = await requirePermission("integrations.manage");
-      const guild = await resolveDiscordGuild();
-      const result = await sendDiscordCalendarReminders(guild.id);
-      await audit(
-        discordActor.id,
-        "assistant.discord_calendar_reminders",
-        "discord_guild",
-        guild.id,
-        { prompt, ...result },
-      );
-      return {
-        status: "success",
-        message: result.skipped
-          ? "Discord calendar announcements are paused or no reminder channel is configured."
-          : `Checked ${result.eligibleEvents} upcoming calendar events and sent ${result.sent} new reminder${result.sent === 1 ? "" : "s"}.`,
-        href: "/admin?tab=discord#discord-calendar",
-      };
-    }
-    if (command.kind === "DISCORD_MONTHLY_DIGEST") {
-      const discordActor = await requirePermission("integrations.manage");
-      const guild = await resolveDiscordGuild();
-      const result = await sendDiscordMonthlyCalendarDigest(guild.id, {
-        force: true,
-      });
-      await audit(
-        discordActor.id,
-        "assistant.discord_monthly_digest",
-        "discord_guild",
-        guild.id,
-        { prompt, ...result },
-      );
-      return {
-        status: "success",
-        message: result.skipped
-          ? result.reason || "The upcoming-month digest was already sent."
-          : `Published the ${result.month} Discord calendar digest with ${result.eventCount} event${result.eventCount === 1 ? "" : "s"}.`,
-        href: "/admin?tab=discord#discord-calendar",
       };
     }
     if (command.kind === "DISCORD_TIMEOUT") {

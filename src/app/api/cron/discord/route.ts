@@ -3,8 +3,6 @@ import {
   discordConfiguration,
   processDiscordOnboarding,
   registerDiscordCommands,
-  sendDiscordCalendarReminders,
-  sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminders,
   syncDiscordDuesAccess,
   syncDiscordGuild,
@@ -32,8 +30,6 @@ export async function GET(request: NextRequest) {
     const jobs = {
       commands: () => registerDiscordCommands(result.guildId),
       messages: () => syncDiscordMessages(result.guildId),
-      reminders: () => sendDiscordCalendarReminders(result.guildId),
-      monthlyDigest: () => sendDiscordMonthlyCalendarDigest(result.guildId),
       registrationDms: () => sendDiscordRegistrationReminders({ guildId: result.guildId, limit: 25 }),
       onboarding: () => processDiscordOnboarding({ guildId: result.guildId, limit: 100 }),
       access: () => syncDiscordDuesAccess({ guildId: result.guildId, configureChannels: false }),

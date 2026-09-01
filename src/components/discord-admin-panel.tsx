@@ -11,7 +11,6 @@ import {
 } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
-  discordCalendarReminders,
   discordChannels,
   discordDirectMessages,
   discordEvents,
@@ -32,14 +31,11 @@ import {
   retryDiscordOnboardingRoles,
   saveDiscordDuesAccessSettings,
   saveDiscordOnboardingSettings,
-  saveDiscordSettings,
   saveDiscordReactionSettings,
   sendAllDiscordReminders,
-  sendCalendarRemindersNow,
   sendDiscordBroadcastReminder,
   sendDiscordReminder,
   sendDiscordMembershipReminderGroup,
-  sendMonthlyCalendarDigestNow,
   syncDiscordNow,
   syncDiscordMessagesNow,
   syncDiscordDuesAccessNow,
@@ -123,7 +119,6 @@ export async function DiscordAdminPanel({
     messageCount,
     topAuthors,
     topChannels,
-    reminderRows,
     liveVoiceChannels,
     guildRoles,
     verificationApplications,
@@ -259,14 +254,6 @@ export async function DiscordAdminPanel({
           )
           .groupBy(discordMessages.channelName)
           .orderBy(desc(count()))
-          .limit(5)
-      : Promise.resolve([]),
-    guild
-      ? getDb()
-          .select()
-          .from(discordCalendarReminders)
-          .where(eq(discordCalendarReminders.guildId, guild.id))
-          .orderBy(desc(discordCalendarReminders.sentAt))
           .limit(5)
       : Promise.resolve([]),
     guild
@@ -1126,133 +1113,6 @@ export async function DiscordAdminPanel({
       {guild && (
         <div
           className="mt-7 scroll-mt-28 border border-[#343434] bg-[#0d0d0d] p-5 sm:p-6"
-          id="discord-calendar"
-        >
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[.12em] text-[#fd7803]">
-                Google Calendar → Discord
-              </p>
-              <h3 className="mt-3 text-xl font-bold">
-                Upcoming event announcements
-              </h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-[#888]">
-                The existing 210 Google Calendar feed is refreshed before each
-                reminder run. Each event is announced once in the selected
-                channel as its start approaches and tags @everyone.
-              </p>
-            </div>
-            <span className="tag">
-              {reminderRows.length
-                ? `Last sent ${formatDate(reminderRows[0].sentAt)}`
-                : "No reminders sent yet"}
-            </span>
-          </div>
-          <ActionForm
-            action={saveDiscordSettings}
-            successMessage="Calendar announcement settings saved."
-            className="mt-6 grid gap-4 md:grid-cols-[1fr_1fr_auto]"
-          >
-            <input type="hidden" name="guildId" value={guild.id} />
-            <label className="field">
-              <span>Calendar reminder channel</span>
-              <select
-                className="input"
-                name="generalChannelId"
-                defaultValue={guild.generalChannelId ?? ""}
-                required
-              >
-                <option value="" disabled>
-                  Select a synchronized channel
-                </option>
-                {channelRows
-                  .filter((channel) => [0, 5].includes(channel.type))
-                  .map((channel) => (
-                    <option value={channel.id} key={channel.id}>
-                      #{channel.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Announce this many hours before</span>
-              <input
-                className="input"
-                name="reminderHours"
-                type="number"
-                min="1"
-                max="168"
-                defaultValue={guild.calendarReminderHours}
-                required
-              />
-            </label>
-            <label className="flex items-center gap-3 text-sm text-[#bbb] md:self-end md:pb-3">
-              <input
-                type="checkbox"
-                name="announcementsEnabled"
-                defaultChecked={guild.calendarAnnouncementsEnabled}
-              />
-              Announcements enabled
-            </label>
-            <button className="button justify-center md:w-fit">
-              Save reminder settings
-            </button>
-          </ActionForm>
-          <ActionForm
-            action={sendCalendarRemindersNow}
-            successMessage="Upcoming events checked; eligible reminders sent."
-            className="mt-3"
-          >
-            <input type="hidden" name="guildId" value={guild.id} />
-            <button
-              className="button secondary w-full justify-center sm:w-auto"
-              disabled={
-                !configuration.botToken || !guild.generalChannelId
-              }
-            >
-              Check and announce upcoming events now
-            </button>
-          </ActionForm>
-          <div className="mt-5 border-t border-[#303030] pt-5">
-            <h4 className="text-sm font-bold text-white">
-              Upcoming-month digest
-            </h4>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-[#888]">
-              On or after the 25th, the daily Google Calendar sync posts one
-              digest containing every event scheduled for the following month.
-              It uses this same channel, tags @everyone once, and will not
-              duplicate a month.
-            </p>
-            <a
-              className="button secondary mt-4 inline-flex w-full justify-center sm:w-auto"
-              href="https://calendar.google.com/calendar/embed?src=c_95f57b77ce9cc3321b6d5ee44042d9f8920481babe4dd9e33f511458453f721e%40group.calendar.google.com&ctz=America%2FChicago"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open connected Google Calendar
-            </a>
-            <ActionForm
-              action={sendMonthlyCalendarDigestNow}
-              successMessage="The upcoming-month digest was checked and sent if it was not already posted."
-              className="mt-3"
-            >
-              <input type="hidden" name="guildId" value={guild.id} />
-              <button
-                className="button secondary w-full justify-center sm:w-auto"
-                disabled={
-                  !configuration.botToken || !guild.generalChannelId
-                }
-              >
-                Send upcoming-month digest now
-              </button>
-            </ActionForm>
-          </div>
-        </div>
-      )}
-
-      {guild && (
-        <div
-          className="mt-7 scroll-mt-28 border border-[#343434] bg-[#0d0d0d] p-5 sm:p-6"
           id="discord-moderation"
         >
           <div className="grid gap-6 lg:grid-cols-[.85fr_1.15fr]">
@@ -1509,11 +1369,6 @@ export async function DiscordAdminPanel({
                 name: channel.name,
                 type: channel.type,
               }))}
-            people={discordMembers.map(({ discord }) => ({
-              discordUserId: discord.discordUserId,
-              displayName: discord.displayName,
-              username: discord.username,
-            }))}
           />
         </div>
       )}

@@ -27,7 +27,7 @@ Supported work:
 - Create meetings, events, attendance activities, scheduling polls, and forms.
 - Create recognition, purchase requests, engineering tracking records, decision matrices, and sponsor research records.
 - Log member hours and attendance, draft or publish news, update inventory, add sponsor funding, and create records for the Control Center.
-- Send a message to a named Discord channel, privately message a linked member, synchronize Discord members/messages, announce eligible calendar reminders, or publish the upcoming-month calendar digest. Discord actions are permission-protected by the application.
+- Send a silent message to a named Discord channel, privately message a linked member, or synchronize Discord members/messages. Channel messages never create user, role, here, or everyone notification pings. Discord actions are permission-protected by the application.
 
 Dates should be ISO timestamps when the user gives enough information. Amounts are dollar values, not cents.`;
 
@@ -44,8 +44,8 @@ Natural-language interpretation rules:
 - If the user provides several independent items, return several commands. Do not collapse them into one description field.
 - Use recent conversation only for clear pronouns or omitted record names. Never invent missing money amounts, people, dates, part numbers, or record identities.
 - If a request is only asking where to sign in or open an admin area, return CHAT with a concise answer and a Markdown link to the relevant site page.
-- Choose a DISCORD command only when the user explicitly says Discord, bot, a Discord channel, DM, server sync, Discord reminder, or Discord calendar digest. A normal task that happens to mention messaging remains a task unless Discord is explicit.
-- For DISCORD_SEND, preserve the named channel without a leading # when possible, keep the exact message content, and put people who should be tagged in mentions. Set mentionEveryone true only when the user explicitly says @everyone, tag everyone, notify everyone, or server-wide notification. For DISCORD_DM, require one named member. Never infer recipients or send a server-wide broadcast.`;
+- Choose a DISCORD command only when the user explicitly says Discord, bot, a Discord channel, DM, or server sync. A normal task that happens to mention messaging remains a task unless Discord is explicit.
+- For DISCORD_SEND, preserve the named channel without a leading # when possible and keep the exact message content. Never add mentions or notification pings. Discord calendar reminders, calendar digests, and JSON Botlog publishing are disabled. For DISCORD_DM, require one named member. Never infer recipients or send a server-wide broadcast.`;
 
 const taskPlanningRules = `
 Task intent rules:
@@ -102,7 +102,7 @@ BUDGET_ADD {plan?, entryKind, description, category?, amount, quantity?, vendor?
 NOTEBOOK_TODO {entry?, items:[string]}; DONATION_STATUS {}; NEXT_EVENT {}; DONATION_CAMPAIGN {title?, description?, goal?, suggestedAmounts?, active?}; CHAT {reply}.
 MEETING_CREATE {title, heldAt?, location?, notes?}; ACTIVITY_CREATE {title, activityType?, startsAt?, endsAt?, location?, description?}; POLL_CREATE {title, description?, dates?, startTime?, endTime?}; FORM_CREATE {title, description?, fields?:[{label,type,required?,options?}]}.
 RECOGNITION_CREATE {title, member, category?, description?}; ATTENDANCE_RECORD {activity, member, status:"PRESENT", note?}; NEWS_CREATE {title, excerpt?, body, status?}; INVENTORY_UPSERT {sku, name?, quantityOnHand?, reorderPoint?, location?, category?, unitCost?, supplier?}; CONTROL_RECORD_CREATE {area?, title, description?, owner?, priority?, dueAt?}; SPONSOR_FUNDING {plan?, sponsorName, amount, status?, tier?, contactName?, contactEmail?}; PURCHASE_CREATE {item, quantity?, vendor?, estimatedUnitCost?, neededBy?, notes?}; ENGINEERING_RECORD_CREATE {recordType, title, description?, priority?, dueAt?}; DECISION_MATRIX_CREATE {title, criteria:[{name,weight,goal}], concepts:[{name,values}], recommendation?}; SPONSOR_RESEARCH {company, website?}.
-DISCORD_SEND {channel, message, mentions?, mentionEveryone?}; DISCORD_DM {member, message}; DISCORD_SYNC {includeMessages?}; DISCORD_CALENDAR_REMINDERS {}; DISCORD_MONTHLY_DIGEST {}; DISCORD_TIMEOUT {member, durationMinutes, reason?}. Use durationMinutes 0 only to clear an existing timeout and never exceed 40320 minutes.
+DISCORD_SEND {channel, message}; DISCORD_DM {member, message}; DISCORD_SYNC {includeMessages?}; DISCORD_TIMEOUT {member, durationMinutes, reason?}. Use durationMinutes 0 only to clear an existing timeout and never exceed 40320 minutes.
 For allocation requests, use TASK_BATCH_CREATE. Never infer a member the user did not name.`;
 
 const commandKinds: AssistantCommand["kind"][] = [
@@ -141,8 +141,6 @@ const commandKinds: AssistantCommand["kind"][] = [
   "DISCORD_SEND",
   "DISCORD_DM",
   "DISCORD_SYNC",
-  "DISCORD_CALENDAR_REMINDERS",
-  "DISCORD_MONTHLY_DIGEST",
   "DISCORD_TIMEOUT",
 ];
 
@@ -369,13 +367,7 @@ const commandJsonSchema: Record<string, unknown> = {
     website: { type: "string" },
     channel: { type: "string" },
     message: { type: "string" },
-    mentions: {
-      type: "array",
-      maxItems: 5,
-      items: { type: "string" },
-    },
     includeMessages: { type: "boolean" },
-    mentionEveryone: { type: "boolean" },
     durationMinutes: {
       type: "integer",
       minimum: 0,

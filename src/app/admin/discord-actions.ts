@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, ilike, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, ilike, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { put } from "@vercel/blob";
@@ -27,14 +27,12 @@ import {
   publishDiscordReactionRolePanel,
   publishDiscordVerificationPanel,
   registerDiscordCommands,
-  sendDiscordCalendarReminders,
   sendDiscordChannelMessage,
   sendDiscordDirectMessage,
   sendDiscordDirectMessageWithFile,
   sendDiscordMemberBroadcast,
   sendDiscordMembershipReminders,
   sendDiscordSelectedMemberMessages,
-  sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminder,
   sendDiscordRegistrationReminders,
   setDiscordChannelSlowmode,
@@ -175,36 +173,6 @@ export async function syncDiscordMessagesNow(formData: FormData) {
   await getDb().insert(auditEvents).values({
     actorMemberId: actor.id,
     action: "DISCORD_MESSAGE_SYNC",
-    entityType: "discord_guild",
-    entityId: guildId,
-    details: result,
-  });
-  revalidatePath("/admin");
-}
-
-export async function sendCalendarRemindersNow(formData: FormData) {
-  const actor = await requirePermission("integrations.manage");
-  const guildId = required(formData, "guildId");
-  const result = await sendDiscordCalendarReminders(guildId);
-  await getDb().insert(auditEvents).values({
-    actorMemberId: actor.id,
-    action: "DISCORD_CALENDAR_REMINDERS",
-    entityType: "discord_guild",
-    entityId: guildId,
-    details: result,
-  });
-  revalidatePath("/admin");
-}
-
-export async function sendMonthlyCalendarDigestNow(formData: FormData) {
-  const actor = await requirePermission("integrations.manage");
-  const guildId = required(formData, "guildId");
-  const result = await sendDiscordMonthlyCalendarDigest(guildId, {
-    force: true,
-  });
-  await getDb().insert(auditEvents).values({
-    actorMemberId: actor.id,
-    action: "DISCORD_MONTHLY_CALENDAR_DIGEST",
     entityType: "discord_guild",
     entityId: guildId,
     details: result,
@@ -539,54 +507,6 @@ export async function announceDiscordRecordingSession(
           : "The recording notice could not be posted.",
     };
   }
-}
-
-export async function saveDiscordSettings(formData: FormData) {
-  const actor = await requirePermission("integrations.manage");
-  const guildId = required(formData, "guildId");
-  const generalChannelId = required(formData, "generalChannelId");
-  const reminderHours = Number(formData.get("reminderHours") || 24);
-  if (
-    !Number.isInteger(reminderHours) ||
-    reminderHours < 1 ||
-    reminderHours > 168
-  ) {
-    throw new Error("Reminder window must be between 1 and 168 hours.");
-  }
-  const [channel] = await getDb()
-    .select()
-    .from(discordChannels)
-    .where(
-      and(
-        eq(discordChannels.id, generalChannelId),
-        eq(discordChannels.guildId, guildId),
-      ),
-    )
-    .limit(1);
-  if (!channel) throw new Error("Select a synchronized Discord channel.");
-  const enabled = formData.get("announcementsEnabled") === "on";
-  await getDb()
-    .update(discordGuilds)
-    .set({
-      generalChannelId,
-      calendarReminderHours: reminderHours,
-      calendarAnnouncementsEnabled: enabled,
-      updatedAt: new Date(),
-    })
-    .where(eq(discordGuilds.id, guildId));
-  await getDb().insert(auditEvents).values({
-    actorMemberId: actor.id,
-    action: "DISCORD_CALENDAR_SETTINGS",
-    entityType: "discord_guild",
-    entityId: guildId,
-    details: {
-      channelId: generalChannelId,
-      channelName: channel.name,
-      reminderHours,
-      enabled,
-    },
-  });
-  revalidatePath("/admin");
 }
 
 export async function saveDiscordReactionSettings(formData: FormData) {
@@ -928,11 +848,7 @@ export async function sendDiscordAdminMessage(
       "";
     const channelId = required(formData, "channelId");
     const requestedContent = required(formData, "content");
-    const mentionEveryone = formData.get("mentionEveryone") === "on";
-    const content =
-      mentionEveryone && !/@(?:everyone|here)\b/i.test(requestedContent)
-        ? `@everyone\n${requestedContent}`
-        : requestedContent;
+    const content = requestedContent;
     if (content.length > 2000) {
       return {
         status: "error",
@@ -956,32 +872,13 @@ export async function sendDiscordAdminMessage(
           "Select a synchronized text channel or thread from this Discord server.",
       };
     }
-    const requestedMentions = [
-      ...content.matchAll(/<@!?(\d{15,22})>/g),
-    ]
-      .map((match) => match[1])
-      .slice(0, 100);
-    const allowedMentions = requestedMentions.length
-      ? await getDb()
-          .select({ discordUserId: discordGuildMembers.discordUserId })
-          .from(discordGuildMembers)
-          .where(
-            and(
-              eq(discordGuildMembers.guildId, guildId),
-              inArray(
-                discordGuildMembers.discordUserId,
-                requestedMentions,
-              ),
-            ),
-          )
-      : [];
     const result = await sendDiscordChannelMessage({
       guildId,
       channelId,
       channelName: channel.name,
       content,
-      allowedUserIds: allowedMentions.map((row) => row.discordUserId),
-      allowEveryone: mentionEveryone,
+      allowedUserIds: [],
+      allowEveryone: false,
     });
     await getDb().insert(auditEvents).values({
       actorMemberId: actor.id,
@@ -992,8 +889,8 @@ export async function sendDiscordAdminMessage(
         guildId,
         channelId,
         channelName: channel.name,
-        mentionedUserCount: allowedMentions.length,
-        mentionedEveryone: mentionEveryone,
+        mentionedUserCount: 0,
+        mentionedEveryone: false,
       },
     });
     revalidatePath("/admin");
@@ -1009,7 +906,7 @@ export async function sendDiscordAdminMessage(
     );
     return {
       status: "success",
-      message: `Message sent to #${channel.name}${mentionEveryone ? " with @everyone" : ""}.`,
+      message: `Message sent to #${channel.name} without notifications.`,
     };
   } catch (error) {
     console.error(

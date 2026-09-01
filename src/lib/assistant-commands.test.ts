@@ -132,8 +132,6 @@ describe("assistant command fallback", () => {
       kind: "DISCORD_SEND",
       channel: "general",
       message: "The meeting starts at 6 PM.",
-      mentions: [],
-      mentionEveryone: false,
     });
     expect(
       inferAssistantCommand(
@@ -143,8 +141,6 @@ describe("assistant command fallback", () => {
       kind: "DISCORD_SEND",
       channel: "general",
       message: "Practice moved to 7 PM",
-      mentions: [],
-      mentionEveryone: true,
     });
     expect(
       inferAssistantCommand(
@@ -161,9 +157,6 @@ describe("assistant command fallback", () => {
       kind: "DISCORD_SYNC",
       includeMessages: true,
     });
-    expect(
-      inferAssistantCommand("Send the Discord monthly calendar digest"),
-    ).toEqual({ kind: "DISCORD_MONTHLY_DIGEST" });
     expect(
       inferAssistantCommand(
         "Timeout Dyshana Torres on Discord for 6 hours because spam",

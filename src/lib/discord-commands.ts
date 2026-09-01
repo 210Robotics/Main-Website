@@ -55,21 +55,6 @@ export const discordApplicationCommands = [
     default_member_permissions: "8",
   },
   {
-    name: "logs",
-    description: "Synchronize messages and publish a full Botlog archive",
-    default_member_permissions: "8",
-  },
-  {
-    name: "calendar",
-    description: "Check the team calendar and send eligible reminders",
-    default_member_permissions: "8",
-  },
-  {
-    name: "digest",
-    description: "Send the upcoming-month Google Calendar digest",
-    default_member_permissions: "8",
-  },
-  {
     name: "timeout",
     description: "Timeout or unmute a Discord member",
     default_member_permissions: "8",

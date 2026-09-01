@@ -4,7 +4,7 @@ const optionalText = z.string().trim().max(500).optional();
 const optionalMoney = z.number().finite().min(0).max(10_000_000).optional();
 
 export const assistantHelpReply =
-  "I can create and allocate tasks, meetings, events, attendance activities, scheduling polls, forms, recognition, purchasing requests, engineering records, sponsor prospects, BOM parts, budgets, notebook to-do lists, donation updates, and permission-protected Discord messages, DMs, synchronization, reminders, and calendar digests. You can also upload a DOCX, PDF, XLSX, or CSV and I will archive it before importing explicit action items.";
+  "I can create and allocate tasks, meetings, events, attendance activities, scheduling polls, forms, recognition, purchasing requests, engineering records, sponsor prospects, BOM parts, budgets, notebook to-do lists, donation updates, and permission-protected Discord messages, DMs, and synchronization. Discord channel messages are always sent without notification pings. You can also upload a DOCX, PDF, XLSX, or CSV and I will archive it before importing explicit action items.";
 
 export const assistantCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("TASK_CREATE"), title: z.string().trim().min(2).max(180), description: z.string().trim().max(4000).default(""), assignee: optionalText, priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"), dueAt: optionalText }),
@@ -51,11 +51,9 @@ export const assistantCommandSchema = z.discriminatedUnion("kind", [
     recommendation: z.string().trim().max(4000).default(""),
   }),
   z.object({ kind: z.literal("SPONSOR_RESEARCH"), company: z.string().trim().min(2).max(300), website: z.string().trim().url().max(1000).optional() }),
-  z.object({ kind: z.literal("DISCORD_SEND"), channel: z.string().trim().min(1).max(200), message: z.string().trim().min(1).max(1800), mentions: z.array(z.string().trim().min(1).max(300)).max(5).default([]), mentionEveryone: z.boolean().default(false) }),
+  z.object({ kind: z.literal("DISCORD_SEND"), channel: z.string().trim().min(1).max(200), message: z.string().trim().min(1).max(2000) }),
   z.object({ kind: z.literal("DISCORD_DM"), member: z.string().trim().min(1).max(300), message: z.string().trim().min(1).max(1900) }),
   z.object({ kind: z.literal("DISCORD_SYNC"), includeMessages: z.boolean().default(true) }),
-  z.object({ kind: z.literal("DISCORD_CALENDAR_REMINDERS") }),
-  z.object({ kind: z.literal("DISCORD_MONTHLY_DIGEST") }),
   z.object({ kind: z.literal("DISCORD_TIMEOUT"), member: z.string().trim().min(1).max(300), durationMinutes: z.number().int().min(0).max(40_320), reason: z.string().trim().max(400).default("") }),
   z.object({ kind: z.literal("CHAT"), reply: z.string().trim().min(1).max(2000) }),
 ]);
@@ -76,18 +74,6 @@ function money(prompt: string) {
 export function inferAssistantCommand(promptValue: string): AssistantCommand | null {
   const prompt = promptValue.trim();
   const lower = prompt.toLowerCase();
-  if (
-    /\bdiscord\b.*\b(?:monthly|month)\b.*\b(?:digest|calendar)\b/i.test(
-      prompt,
-    )
-  )
-    return { kind: "DISCORD_MONTHLY_DIGEST" };
-  if (
-    /\bdiscord\b.*\b(?:calendar|event)\b.*\b(?:reminder|announce|announcement)\b/i.test(
-      prompt,
-    )
-  )
-    return { kind: "DISCORD_CALENDAR_REMINDERS" };
   if (
     /\b(?:sync|refresh)\b.*\bdiscord\b/i.test(prompt) ||
     /\bdiscord\b.*\b(?:sync|refresh)\b/i.test(prompt)
@@ -137,10 +123,6 @@ export function inferAssistantCommand(promptValue: string): AssistantCommand | n
   );
   if (discordMessage) {
     const rawMessage = discordMessage[2].trim();
-    const mentionEveryone =
-      /@everyone|\b(?:tag|notify|mention)\s+everyone\b|\bserver-wide notification\b/i.test(
-        prompt,
-      );
     const message = rawMessage
       .replace(
         /\s*(?:[,;—-]\s*)?(?:and\s+)?(?:tag|notify|mention)\s+everyone[.!]?\s*$/i,
@@ -151,8 +133,6 @@ export function inferAssistantCommand(promptValue: string): AssistantCommand | n
       kind: "DISCORD_SEND",
       channel: discordMessage[1],
       message,
-      mentions: [],
-      mentionEveryone,
     };
   }
   if (

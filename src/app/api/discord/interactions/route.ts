@@ -14,8 +14,6 @@ import {
   publishDiscordVerificationPanel,
   publishDiscordReactionRolePanel,
   recordDiscordEvent,
-  sendDiscordCalendarReminders,
-  sendDiscordMonthlyCalendarDigest,
   sendDiscordRegistrationReminder,
   sendDiscordMembershipReminders,
   setDiscordGuildMemberTimeout,
@@ -682,9 +680,6 @@ export async function POST(request: Request) {
     if (
       [
         "sync",
-        "logs",
-        "calendar",
-        "digest",
         "timeout",
         "stopall",
         "voice",
@@ -742,7 +737,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (["sync", "logs", "calendar", "digest"].includes(commandName)) {
+    if (commandName === "sync") {
       const applicationId =
         interaction.application_id || process.env.DISCORD_APPLICATION_ID || "";
       const interactionToken = interaction.token || "";
@@ -753,38 +748,13 @@ export async function POST(request: Request) {
       }
       after(async () => {
         try {
-          let content = "";
-          if (commandName === "sync") {
-            const memberResult = await syncDiscordGuild(guildId);
-            const messageResult = await syncDiscordMessages(guildId);
-            content =
-              `Sync complete: ${memberResult.memberCount} Discord members, ` +
-              `${memberResult.linkedMemberCount} linked accounts, ` +
-              `${messageResult.channelsRead} channels checked, and ` +
-              `${messageResult.messagesSaved} new messages saved.`;
-          } else if (commandName === "logs") {
-            const result = await syncDiscordMessages(guildId);
-            const archive = result.archive;
-            content =
-              `Botlog complete: ${result.channelsRead} channels checked, ` +
-              `${result.messagesSaved} new messages saved, and ` +
-              `${result.messagesVerified} new messages verified. ` +
-              (archive.published
-                ? "The full JSON archive was posted in #Botlog."
-                : `Archive was not posted: ${archive.reason || "unknown reason"}`);
-          } else if (commandName === "calendar") {
-            const result = await sendDiscordCalendarReminders(guildId);
-            content = result.skipped
-              ? "Calendar reminders are not configured for this server."
-              : `Calendar check complete: ${result.eligibleEvents} upcoming events were eligible, ${result.sent} reminders were sent, and ${result.alreadySent} were already announced.`;
-          } else {
-            const result = await sendDiscordMonthlyCalendarDigest(guildId, {
-              force: true,
-            });
-            content = result.sent
-              ? "The upcoming-month calendar digest was posted."
-              : `The digest was not posted: ${result.reason || "no upcoming events were available"}.`;
-          }
+          const memberResult = await syncDiscordGuild(guildId);
+          const messageResult = await syncDiscordMessages(guildId);
+          const content =
+            `Sync complete: ${memberResult.memberCount} Discord members, ` +
+            `${memberResult.linkedMemberCount} linked accounts, ` +
+            `${messageResult.channelsRead} channels checked, and ` +
+            `${messageResult.messagesSaved} new messages saved.`;
           await sendInteractionFollowup({
             applicationId,
             token: interactionToken,
@@ -1214,7 +1184,7 @@ export async function POST(request: Request) {
       );
     }
     return interactionResponse(
-      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /logs, /calendar, /digest, /timeout, /verification, /member-reminders, /roles, /register, /status, /dues, or /team.",
+      "Unknown command. Try /ask, /record, /voice, /stopall, /sync, /timeout, /verification, /member-reminders, /roles, /register, /status, /dues, or /team.",
     );
   } catch (error) {
     console.error("Discord interaction failed", error);

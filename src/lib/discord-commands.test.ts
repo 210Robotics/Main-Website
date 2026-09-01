@@ -10,11 +10,11 @@ describe("Discord guild commands", () => {
         "ask",
         "record",
         "sync",
-        "logs",
-        "calendar",
-        "digest",
         "timeout",
       ]),
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining(["logs", "calendar", "digest"]),
     );
   });
 
